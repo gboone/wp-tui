@@ -47,7 +47,7 @@ def _rebuild(block: Block) -> str:
         return block.inner_html
 
     short = _short_name(block.block_name or "")
-    attrs = _encode_attrs(block.attributes)
+    attrs = _encode_attrs_for(block)
 
     if _is_void(block):
         return f"<!-- wp:{short}{attrs} /-->"
@@ -88,9 +88,27 @@ def _short_name(full_name: str) -> str:
     return full_name
 
 
+def _encode_attrs_for(block: Block) -> str:
+    """Prefer the exact parsed attribute bytes; only re-encode when they were changed.
+
+    Re-encoding can't perfectly reproduce WordPress's slash/unicode/``--`` escaping, so
+    an untouched block (including a container dirtied only because a child was edited)
+    re-emits its original attribute substring verbatim — no drift, no delimiter risk.
+    """
+    if not block.attributes:
+        return ""
+    if block.attributes_raw is not None:
+        return f" {block.attributes_raw}"
+    return _encode_attrs(block.attributes)
+
+
 def _encode_attrs(attrs: dict) -> str:
     if not attrs:
         return ""
-    # WordPress serializes attributes as compact JSON with a leading space.
-    encoded = json.dumps(attrs, separators=(",", ":"), ensure_ascii=False)
+    # Compact JSON with a leading space. ``ensure_ascii`` escapes non-ASCII to \uXXXX,
+    # and we escape ``--`` so an attribute value can never terminate the HTML comment
+    # delimiter. This is best-effort WP matching for synthesized/edited attrs; parsed
+    # blocks re-emit their exact bytes via _encode_attrs_for instead.
+    encoded = json.dumps(attrs, separators=(",", ":"), ensure_ascii=True)
+    encoded = encoded.replace("--", "\\u002d\\u002d")
     return f" {encoded}"

@@ -96,7 +96,15 @@ class ConnectScreen(Screen[None]):
         if not (base_url and username and app_password):
             self._set_status("Site URL, username, and password are all required.", error=True)
             return
-        if not base_url.startswith(("http://", "https://")):
+        if base_url.startswith("http://"):
+            # HTTP Basic sends the Application Password in (reversible) base64; refuse to
+            # transmit it over an unencrypted channel.
+            self._set_status(
+                "Refusing to send credentials over plaintext http://. Use https://.",
+                error=True,
+            )
+            return
+        if not base_url.startswith("https://"):
             base_url = "https://" + base_url
         profile = SiteProfile(name=base_url, base_url=base_url, username=username)
         self._set_status("Connecting…")

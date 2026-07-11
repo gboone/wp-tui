@@ -26,7 +26,8 @@ _FIGCAP_RE = re.compile(r"<figcaption\b[^>]*>(.*?)</figcaption>", re.DOTALL)
 
 
 def _attr_re(name: str) -> re.Pattern[str]:
-    return re.compile(r'(\b' + re.escape(name) + r'=")(.*?)(")', re.DOTALL)
+    # Accept either quote style; group 2 is the delimiter, group 3 the value.
+    return re.compile(r"(\b" + re.escape(name) + r"=)([\"'])(.*?)\2", re.DOTALL)
 
 
 @dataclass(frozen=True)
@@ -40,14 +41,15 @@ class ImageParts:
 
 def _get_attr(tag: str, name: str) -> str:
     match = _attr_re(name).search(tag)
-    return unescape(match.group(2)) if match else ""
+    return unescape(match.group(3)) if match else ""
 
 
 def _set_attr(tag: str, name: str, value: str) -> str:
     escaped = escape(value, quote=True)
-    pattern = _attr_re(name)
-    if pattern.search(tag):
-        return pattern.sub(lambda m: m.group(1) + escaped + m.group(3), tag, count=1)
+    match = _attr_re(name).search(tag)
+    if match is not None:
+        # Replace only the value, preserving the original quote delimiter.
+        return tag[: match.start(3)] + escaped + tag[match.end(3) :]
     # Attribute absent: insert it right after "<img".
     return tag[:4] + f' {name}="{escaped}"' + tag[4:]
 
@@ -89,10 +91,18 @@ def set_image_parts(block: Block, *, src: str, alt: str, caption_html: str) -> b
 def _set_caption(inner: str, caption_html: str) -> str:
     match = _FIGCAP_RE.search(inner)
     if caption_html:
+        figcaption = f'<figcaption class="wp-element-caption">{caption_html}</figcaption>'
         if match:
             return inner[: match.start(1)] + caption_html + inner[match.end(1) :]
-        figcaption = f'<figcaption class="wp-element-caption">{caption_html}</figcaption>'
         close = inner.rfind("</figure>")
-        return inner[:close] + figcaption + inner[close:] if close != -1 else inner + figcaption
+        if close != -1:
+            return inner[:close] + figcaption + inner[close:]
+        # No <figure>: wrap the img with the caption so the figcaption is well-formed
+        # rather than dangling after the markup.
+        img = _IMG_RE.search(inner)
+        if img is not None:
+            wrapped = f"<figure>{img.group(0)}{figcaption}</figure>"
+            return inner[: img.start()] + wrapped + inner[img.end() :]
+        return inner  # nothing to attach a caption to
     # Empty caption: drop an existing figcaption entirely.
     return inner[: match.start()] + inner[match.end() :] if match else inner

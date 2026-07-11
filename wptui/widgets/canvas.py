@@ -11,6 +11,7 @@ deferred. Editing a nested child dirties its ancestors at ``sync()`` time via
 from __future__ import annotations
 
 from textual.containers import VerticalScroll
+from textual.css.query import NoMatches
 from textual.widget import Widget
 from textual.widgets import Static
 
@@ -82,7 +83,12 @@ class BlockCanvas(VerticalScroll):
     def sync(self) -> None:
         """Flush editor widgets into their blocks, then dirty their ancestors."""
         for editor in self._editors:
-            editor.commit()
+            try:
+                editor.commit()
+            except NoMatches:
+                # A recompose can leave an editor in _editors whose child inputs aren't
+                # mounted yet; skip it rather than crash the save. It has no edits to flush.
+                continue
         propagate_dirty(self.blocks)
 
     # -- structural operations (top-level blocks) -------------------------

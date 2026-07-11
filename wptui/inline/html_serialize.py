@@ -1,27 +1,26 @@
 """Serialize an :class:`InlineDocument` back to minimal, well-nested WordPress HTML.
 
 Tags are kept open across adjacent runs that share them (via a small open-tag stack),
-so ``bold("a b")`` emits one ``<strong>`` rather than one per run. A fixed nesting order
-(link outermost, then strong, em, code) makes the output deterministic.
+so ``bold("a b")`` emits one ``<strong>`` rather than one per run. Marks nest by span
+width (link outermost, then wider marks, code innermost) so output is deterministic and
+byte-stable across a document -> HTML -> document round-trip.
 """
 
 from __future__ import annotations
 
 from html import escape
 
-from wptui.inline.model import InlineDocument, Link, Mark, Run
+from wptui.inline.model import InlineDocument, Link, Mark, Run, mark_extents, ordered_marks
 
-# Outermost-to-innermost nesting order for stacked formats.
-_MARK_ORDER: tuple[Mark, ...] = (Mark.BOLD, Mark.ITALIC, Mark.CODE)
 _MARK_TAG: dict[Mark, str] = {Mark.BOLD: "strong", Mark.ITALIC: "em", Mark.CODE: "code"}
 
 
-def _tokens(run: Run) -> list[object]:
-    """The ordered open-tag tokens a run needs: link (outer) then marks in order."""
+def _tokens(run: Run, extents) -> list[object]:
+    """The ordered open-tag tokens a run needs: link (outer) then marks widest-first."""
     tokens: list[object] = []
     if run.link is not None:
         tokens.append(run.link)
-    tokens.extend(m for m in _MARK_ORDER if m in run.marks)
+    tokens.extend(ordered_marks(run, extents))
     return tokens
 
 
@@ -41,9 +40,10 @@ def document_to_html(doc: InlineDocument) -> str:
     """Render ``doc`` to a WordPress inner-HTML fragment."""
     out: list[str] = []
     stack: list[object] = []
+    extents = mark_extents(doc.runs)
 
     for run in doc.runs:
-        wanted: list[object] = [] if run.raw else _tokens(run)
+        wanted: list[object] = [] if run.raw else _tokens(run, extents)
 
         # Keep the shared prefix of currently-open tags; close the rest (inner-first).
         common = 0

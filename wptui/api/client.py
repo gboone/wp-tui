@@ -68,13 +68,32 @@ class WordPressClient:
         _raise_for_status(response)
         return response
 
+    @staticmethod
+    def _json(response: httpx.Response) -> Any:
+        """Decode a JSON body, mapping a non-JSON 2xx to :class:`NetworkError`.
+
+        A captive portal, security plugin, or reverse-proxy page can return HTTP 200
+        with an HTML body; without this guard the raw ``JSONDecodeError`` would escape
+        the async worker and crash the whole TUI.
+        """
+        try:
+            return response.json()
+        except ValueError as err:
+            raise NetworkError(
+                "The server returned a non-JSON response. Is this a WordPress REST API "
+                "endpoint, and is the site reachable without a login/proxy page?"
+            ) from err
+
     async def verify(self) -> dict[str, Any]:
         """Confirm credentials by fetching the authenticated user.
 
         Returns the ``/users/me`` payload. Raises :class:`AuthError` on 401/403.
         """
         response = await self._request("GET", "/users/me", params={"context": "edit"})
-        return response.json()
+        data = self._json(response)
+        if not isinstance(data, dict):
+            raise NetworkError("Unexpected response shape from /users/me.")
+        return data
 
     async def list_posts(
         self,
@@ -96,7 +115,10 @@ class WordPressClient:
         if search:
             params["search"] = search
         response = await self._request("GET", "/posts", params=params)
-        return [PostSummary.from_json(item) for item in response.json()]
+        data = self._json(response)
+        if not isinstance(data, list):
+            raise NetworkError("Expected a list of posts from the server.")
+        return [PostSummary.from_json(item) for item in data if isinstance(item, dict)]
 
     async def get_post(self, post_id: int) -> PostDetail:
         """Fetch one post with raw, editable block content (``context=edit``)."""
@@ -105,7 +127,7 @@ class WordPressClient:
             "_fields": "id,title,content,status,modified_gmt,link",
         }
         response = await self._request("GET", f"/posts/{post_id}", params=params)
-        return PostDetail.from_json(response.json())
+        return _post_detail(self._json(response))
 
     async def update_post(
         self,
@@ -139,7 +161,14 @@ class WordPressClient:
         response = await self._request(
             "POST", f"/posts/{post_id}", params=params, json=payload
         )
-        return PostDetail.from_json(response.json())
+        return _post_detail(self._json(response))
+
+
+def _post_detail(data: Any) -> PostDetail:
+    """Build a PostDetail, rejecting an unexpected body shape as a NetworkError."""
+    if not isinstance(data, dict) or "id" not in data:
+        raise NetworkError("Unexpected response shape for a post.")
+    return PostDetail.from_json(data)
 
 
 def _raise_for_status(response: httpx.Response) -> None:

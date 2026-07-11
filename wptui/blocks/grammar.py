@@ -107,9 +107,15 @@ def parse(document: str) -> list[Block]:
             offset = token_end
 
     # Any unterminated openers: fall back to emitting their raw source so we never
-    # drop bytes (malformed input).
+    # drop bytes (malformed input). Start from the freeform that preceded the
+    # outermost opener, not the opener itself, or that leading text is lost.
     for frame in stack:
-        _emit_freeform(document[frame.token_start:], output)
+        start = (
+            frame.leading_html_start
+            if frame.leading_html_start is not None
+            else frame.token_start
+        )
+        _emit_freeform(document[start:], output)
         return output  # remaining tokens already consumed into this tail
 
     # Trailing freeform after the last token.
@@ -130,7 +136,12 @@ def _classify(match) -> str:
 def _make_block(match, original_raw: str) -> Block:
     name = _full_name(match.group("name"))
     attrs = _parse_attrs(match.group("attrs"))
-    return Block(block_name=name, attributes=attrs, original_raw=original_raw)
+    return Block(
+        block_name=name,
+        attributes=attrs,
+        attributes_raw=match.group("attrs"),
+        original_raw=original_raw,
+    )
 
 
 def _full_name(name: str) -> str:

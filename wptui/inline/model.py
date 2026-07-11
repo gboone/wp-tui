@@ -86,3 +86,30 @@ class InlineDocument:
         if not isinstance(other, InlineDocument):
             return NotImplemented
         return self.runs == other.runs
+
+
+def mark_extents(runs: list[Run]) -> dict[Mark, tuple[int, int]]:
+    """First/last run index each mark spans, so wider marks can nest outermost."""
+    extents: dict[Mark, tuple[int, int]] = {}
+    for index, run in enumerate(runs):
+        for mark in run.marks:
+            first, _ = extents.get(mark, (index, index))
+            extents[mark] = (first, index)
+    return extents
+
+
+def ordered_marks(run: Run, extents: dict[Mark, tuple[int, int]]) -> list[Mark]:
+    """A run's marks ordered outermost-first: widest span outer, CODE always innermost.
+
+    Ordering by span (not a fixed BOLD/ITALIC precedence) is what lets both serializers
+    nest correctly — e.g. italic spanning a bold sub-span emits with italic outside — so
+    HTML and markdown both re-parse to the same document.
+    """
+
+    def sort_key(mark: Mark) -> tuple:
+        if mark is Mark.CODE:
+            return (1, 0, 0, 0)  # innermost; its content is literal
+        first, last = extents[mark]
+        return (0, first, -last, 0 if mark is Mark.BOLD else 1)
+
+    return sorted(run.marks, key=sort_key)

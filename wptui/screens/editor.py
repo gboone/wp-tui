@@ -41,7 +41,7 @@ class EditorScreen(Screen[None]):
     def on_mount(self) -> None:
         self._load()
 
-    @work(exclusive=True)
+    @work(exclusive=True, group="editor-load")
     async def _load(self) -> None:
         client = self.app.client  # type: ignore[attr-defined]
         if client is None:
@@ -90,16 +90,18 @@ class EditorScreen(Screen[None]):
     def action_save(self) -> None:
         self._save()
 
-    @work(exclusive=True)
+    @work(exclusive=True, group="editor-save")
     async def _save(self) -> None:
         client = self.app.client  # type: ignore[attr-defined]
         if client is None or self._canvas is None:
             return
-        self._canvas.sync()
-        content = serialize(self._canvas.blocks)
-        title = self.query_one("#editor-title", Input).value
         self._set_status("Saving…")
         try:
+            # Building the payload can itself raise (serialization); keep it inside the
+            # guard so a bad block reports an error instead of crashing the save worker.
+            self._canvas.sync()
+            content = serialize(self._canvas.blocks)
+            title = self.query_one("#editor-title", Input).value
             detail = await client.update_post(
                 self._summary.id,
                 content_raw=content,
@@ -111,6 +113,9 @@ class EditorScreen(Screen[None]):
             return
         except ApiError as err:
             self._set_status(f"Save failed: {err}", error=True)
+            return
+        except Exception as err:  # never let a save crash the whole TUI
+            self._set_status(f"Save failed unexpectedly: {err}", error=True)
             return
         self._modified_gmt = detail.modified_gmt
         self._set_status(f"Saved · modified {detail.modified_gmt}")

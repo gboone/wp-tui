@@ -44,6 +44,12 @@ class Block:
     inner_content: list[str | None] = field(default_factory=list)
     """Interleaved inner content: HTML strings and ``None`` placeholders marking where
     each child block from :attr:`inner_blocks` is spliced back in."""
+    attributes_raw: str | None = None
+    """Exact JSON attribute substring as parsed (without the leading space), or ``None``
+    when the block had no attributes. Re-emitted verbatim on a dirty rebuild so an
+    untouched block's attributes never drift from WordPress's exact byte encoding
+    (slash/unicode/``--`` escaping). Set to ``None`` if you actually change
+    :attr:`attributes`, so they get re-encoded."""
     original_raw: str = ""
     """Exact source substring for this block (for freeform blocks, the text itself)."""
     dirty: bool = False

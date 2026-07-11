@@ -39,8 +39,14 @@ class WPTuiApp(App[None]):
     def on_mount(self) -> None:
         self.push_screen(ConnectScreen())
 
-    def on_connect_screen_connected(self, message: ConnectScreen.Connected) -> None:
+    async def on_connect_screen_connected(self, message: ConnectScreen.Connected) -> None:
         """Handle a successful connection from the connect screen."""
+        if self.client is not None and self.client is not message.client:
+            # Reconnecting: close the previous client so its socket pool isn't leaked.
+            try:
+                await self.client.aclose()
+            except Exception:
+                pass
         self.client = message.client
         self.profile = message.profile
         self.sub_title = message.profile.base_url
@@ -48,5 +54,8 @@ class WPTuiApp(App[None]):
 
     async def action_quit(self) -> None:  # type: ignore[override]
         if self.client is not None:
-            await self.client.aclose()
+            try:
+                await self.client.aclose()
+            except Exception:
+                pass  # never let cleanup failure block the quit
         self.exit()

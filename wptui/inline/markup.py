@@ -13,7 +13,14 @@ Parsing is intentionally forgiving: an unterminated marker is treated as literal
 
 from __future__ import annotations
 
-from wptui.inline.model import InlineDocument, Link, Mark, Run
+from wptui.inline.model import (
+    InlineDocument,
+    Link,
+    Mark,
+    Run,
+    mark_extents,
+    ordered_marks,
+)
 
 # Characters that carry markup meaning and must be backslash-escaped in plain text.
 _ESCAPABLE = set("\\`*[]")
@@ -63,7 +70,18 @@ def _parse_inline(s: str, marks: frozenset[Mark], link: Link | None) -> list[Run
                 continue
 
         elif c == "*":
-            if s.startswith("**", i):
+            if s.startswith("***", i):
+                close = _find_close(s, i + 3, "***")
+                if close != -1:
+                    flush()
+                    runs.extend(
+                        _parse_inline(
+                            s[i + 3 : close], marks | {Mark.BOLD, Mark.ITALIC}, link
+                        )
+                    )
+                    i = close + 3
+                    continue
+            elif s.startswith("**", i):
                 close = _find_close(s, i + 2, "**")
                 if close != -1:
                     flush()
@@ -189,7 +207,17 @@ def _scan_spans(s: str, base: int, spans: list[tuple[int, int, str]]) -> None:
                 continue
 
         elif c == "*":
-            if s.startswith("**", i):
+            if s.startswith("***", i):
+                close = _find_close(s, i + 3, "***")
+                if close != -1:
+                    spans.append((base + i, base + i + 3, "marker"))
+                    spans.append((base + i + 3, base + close, "bold"))
+                    spans.append((base + i + 3, base + close, "italic"))
+                    _scan_spans(s[i + 3 : close], base + i + 3, spans)
+                    spans.append((base + close, base + close + 3, "marker"))
+                    i = close + 3
+                    continue
+            elif s.startswith("**", i):
                 close = _find_close(s, i + 2, "**")
                 if close != -1:
                     spans.append((base + i, base + i + 2, "marker"))
@@ -211,19 +239,20 @@ def _scan_spans(s: str, base: int, spans: list[tuple[int, int, str]]) -> None:
         i += 1
 
 
-# Outermost-to-innermost nesting order for markdown markers. Because the flat run
-# model records mark *sets* (not nesting order), overlapping marks are normalized to
-# this canonical order — which round-trips cleanly for bold-outer nesting and always
-# round-trips through the storage HTML.
-_MD_ORDER: tuple[Mark, ...] = (Mark.BOLD, Mark.ITALIC, Mark.CODE)
 _MD_OPEN: dict[Mark, str] = {Mark.BOLD: "**", Mark.ITALIC: "*", Mark.CODE: "`"}
 
 
-def _md_tokens(run: Run) -> list[object]:
+def _md_tokens(run: Run, extents: dict[Mark, tuple[int, int]]) -> list[object]:
+    """Ordered open-marker tokens for a run: link, then marks widest-extent-first.
+
+    Ordering marks by span width (widest outermost) makes nesting correct:
+    ``<em>a <strong>b</strong> c</em>`` emits ``*a **b** c*`` (not an ambiguous
+    ``****``), and a single bold+italic run emits ``***x***``.
+    """
     tokens: list[object] = []
     if run.link is not None:
         tokens.append(run.link)
-    tokens.extend(m for m in _MD_ORDER if m in run.marks)
+    tokens.extend(ordered_marks(run, extents))
     return tokens
 
 
@@ -241,13 +270,15 @@ def document_to_markdown(doc: InlineDocument) -> str:
     """Render ``doc`` to markdown-style marker text.
 
     Markers are shared across adjacent runs that carry them (via an open-marker stack),
-    so a mark spanning several runs emits one marker pair rather than one per run.
+    so a mark spanning several runs emits one marker pair rather than one per run, and
+    marks nest by span width so the result re-parses to the same document.
     """
     out: list[str] = []
     stack: list[object] = []
+    extents = mark_extents(doc.runs)
 
     for run in doc.runs:
-        wanted: list[object] = [] if run.raw else _md_tokens(run)
+        wanted: list[object] = [] if run.raw else _md_tokens(run, extents)
 
         common = 0
         while common < len(stack) and common < len(wanted) and stack[common] == wanted[common]:

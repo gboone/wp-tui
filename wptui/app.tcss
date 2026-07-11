@@ -151,6 +151,27 @@ OpaqueCard {
     color: $text-muted;
 }
 
+/* Post settings screen */
+#settings-form {
+    height: 1fr;
+    padding: 1 2;
+}
+
+.settings-title {
+    text-style: bold;
+    color: $accent;
+    margin-bottom: 1;
+}
+
+.settings-label {
+    color: $text-muted;
+    margin-top: 1;
+}
+
+#settings-form Input, #settings-form Select, #settings-form Button {
+    margin-bottom: 1;
+}
+
 /* View post screen */
 #view-title {
     dock: top;

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import mimetypes
+from pathlib import Path
 from types import TracebackType
 from typing import Any
 
@@ -27,6 +29,27 @@ _TYPE_PATH = {"post": "posts", "page": "pages"}
 def _type_path(post_type: str) -> str:
     """REST collection segment for a post type (``post`` -> ``posts``)."""
     return _TYPE_PATH.get(post_type, "posts")
+
+
+_IMAGE_MIME = {
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".gif": "image/gif",
+    ".webp": "image/webp",
+    ".svg": "image/svg+xml",
+    ".bmp": "image/bmp",
+    ".tif": "image/tiff",
+    ".tiff": "image/tiff",
+}
+
+
+def _guess_mime(filename: str) -> str:
+    ext = Path(filename).suffix.lower()
+    if ext in _IMAGE_MIME:
+        return _IMAGE_MIME[ext]
+    guessed, _ = mimetypes.guess_type(filename)
+    return guessed or "application/octet-stream"
 
 
 class WordPressClient:
@@ -196,12 +219,92 @@ class WordPressClient:
         )
         return _post_detail(self._json(response))
 
+    # -- media --------------------------------------------------------------
+
+    async def upload_media(
+        self,
+        file_path: str,
+        *,
+        title: str = "",
+        alt: str = "",
+        caption: str = "",
+        description: str = "",
+        timeout: float = 120.0,
+    ) -> MediaItem:
+        """Upload a local file to the media library in one multipart request.
+
+        Uses an extended timeout since media POSTs can be large. Raises
+        :class:`NetworkError` if the file can't be read or the server rejects it.
+        """
+        path = Path(file_path)
+        try:
+            data = path.read_bytes()
+        except OSError as err:
+            raise NetworkError(f"Cannot read file '{file_path}': {err}") from err
+        files = {"file": (path.name, data, _guess_mime(path.name))}
+        form: dict[str, str] = {}
+        if title:
+            form["title"] = title
+        if alt:
+            form["alt_text"] = alt
+        if caption:
+            form["caption"] = caption
+        if description:
+            form["description"] = description
+        response = await self._request(
+            "POST", "/media", files=files, data=form, timeout=timeout
+        )
+        return _media_item(self._json(response))
+
+    async def get_media(self, media_id: int) -> MediaItem:
+        """Fetch one media item (used to resolve a featured image for display)."""
+        params = {"context": "edit", "_fields": "id,source_url,alt_text,caption,title,mime_type"}
+        response = await self._request("GET", f"/media/{media_id}", params=params)
+        return _media_item(self._json(response))
+
+    # -- taxonomy terms -----------------------------------------------------
+
+    async def list_terms(
+        self, taxonomy: str, search: str | None = None, *, per_page: int = 50
+    ) -> list[Term]:
+        """List terms for a taxonomy REST route (``categories`` or ``tags``)."""
+        params: dict[str, Any] = {
+            "context": "edit",
+            "per_page": per_page,
+            "_fields": "id,name,taxonomy",
+            "orderby": "count",
+            "order": "desc",
+        }
+        if search:
+            params["search"] = search
+        response = await self._request("GET", f"/{taxonomy}", params=params)
+        data = self._json(response)
+        if not isinstance(data, list):
+            raise NetworkError("Expected a list of terms from the server.")
+        return [Term.from_json(t) for t in data if isinstance(t, dict)]
+
+    async def create_term(self, taxonomy: str, name: str) -> Term:
+        """Create a new term in a taxonomy and return it."""
+        params = {"context": "edit", "_fields": "id,name,taxonomy"}
+        response = await self._request("POST", f"/{taxonomy}", params=params, json={"name": name})
+        data = self._json(response)
+        if not isinstance(data, dict) or "id" not in data:
+            raise NetworkError("Unexpected response creating a term.")
+        return Term.from_json(data)
+
 
 def _post_detail(data: Any) -> PostDetail:
     """Build a PostDetail, rejecting an unexpected body shape as a NetworkError."""
     if not isinstance(data, dict) or "id" not in data:
         raise NetworkError("Unexpected response shape for a post.")
     return PostDetail.from_json(data)
+
+
+def _media_item(data: Any) -> MediaItem:
+    """Build a MediaItem, rejecting an unexpected body shape as a NetworkError."""
+    if not isinstance(data, dict) or "id" not in data:
+        raise NetworkError("Unexpected response shape for a media item.")
+    return MediaItem.from_json(data)
 
 
 def _raise_for_status(response: httpx.Response) -> None:

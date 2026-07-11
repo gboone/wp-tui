@@ -17,6 +17,8 @@ class PostListScreen(Screen[None]):
 
     BINDINGS = [
         ("/", "focus_search", "Search"),
+        ("n", "new_post", "New post"),
+        ("N", "new_page", "New page"),
         ("r", "reload", "Reload"),
         ("escape", "app.pop_screen", "Back"),
     ]
@@ -53,7 +55,17 @@ class PostListScreen(Screen[None]):
     def _on_row_selected(self, event: DataTable.RowSelected) -> None:
         summary = self._rows.get(event.row_key)
         if summary is not None:
-            self.app.push_screen(EditorScreen(summary))
+            self.app.push_screen(EditorScreen(summary), self._after_editor)
+
+    def action_new_post(self) -> None:
+        self.app.push_screen(EditorScreen(post_type="post"), self._after_editor)
+
+    def action_new_page(self) -> None:
+        self.app.push_screen(EditorScreen(post_type="page"), self._after_editor)
+
+    def _after_editor(self, _result: object) -> None:
+        """Refresh the list when returning from the editor (new/edited posts show up)."""
+        self._load()
 
     @work(exclusive=True)
     async def _load(self, *, search: str | None = None) -> None:

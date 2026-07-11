@@ -118,7 +118,7 @@ async def test_insert_paragraph_via_keybinding():
     from wptui.screens.editor import EditorScreen
 
     class Client:
-        async def get_post(self, post_id):
+        async def get_post(self, post_id, post_type="post"):
             return PostDetail(post_id, "T", PARA, "draft", "2026-01-01T00:00:00", "http://x/1")
 
         async def aclose(self):

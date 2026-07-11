@@ -20,7 +20,7 @@ class RecordingClient:
         self.saved_content: str | None = None
         self.saved_title: str | None = None
 
-    async def get_post(self, post_id: int) -> PostDetail:
+    async def get_post(self, post_id: int, post_type: str = "post") -> PostDetail:
         return PostDetail(
             id=post_id,
             title_raw="My Post",
@@ -31,7 +31,7 @@ class RecordingClient:
         )
 
     async def update_post(
-        self, post_id, *, content_raw=None, title_raw=None, expected_modified_gmt=None
+        self, post_id, *, content_raw=None, title_raw=None, settings=None, expected_modified_gmt=None
     ) -> PostDetail:
         self.saved_content = content_raw
         self.saved_title = title_raw

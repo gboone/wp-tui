@@ -25,7 +25,7 @@ class FakeClient:
             posts = [p for p in posts if search.lower() in p.title.lower()]
         return posts
 
-    async def get_post(self, post_id: int) -> PostDetail:
+    async def get_post(self, post_id: int, post_type: str = "post") -> PostDetail:
         return PostDetail(
             id=post_id,
             title_raw="Hello World",

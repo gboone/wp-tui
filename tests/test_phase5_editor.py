@@ -23,10 +23,10 @@ class RecordingClient:
         self._content = content
         self.saved_content: str | None = None
 
-    async def get_post(self, post_id):
+    async def get_post(self, post_id, post_type="post"):
         return PostDetail(post_id, "T", self._content, "draft", "2026-01-01T00:00:00", "http://x/1")
 
-    async def update_post(self, post_id, *, content_raw=None, title_raw=None, expected_modified_gmt=None):
+    async def update_post(self, post_id, *, content_raw=None, title_raw=None, settings=None, expected_modified_gmt=None):
         self.saved_content = content_raw
         return PostDetail(post_id, title_raw or "", content_raw or "", "draft", "2026-01-02T00:00:00", "http://x/1")
 

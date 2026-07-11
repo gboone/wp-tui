@@ -172,6 +172,36 @@ OpaqueCard {
     margin-bottom: 1;
 }
 
+/* Term picker modal */
+TermPicker {
+    align: center middle;
+}
+
+#term-picker {
+    width: 60;
+    max-width: 90%;
+    height: auto;
+    max-height: 80%;
+    padding: 1 2;
+    border: round $primary;
+    background: $surface;
+}
+
+.term-title {
+    text-style: bold;
+    margin-bottom: 1;
+}
+
+#term-list {
+    height: auto;
+    max-height: 15;
+    margin-bottom: 1;
+}
+
+#term-add-row {
+    height: auto;
+}
+
 /* View post screen */
 #view-title {
     dock: top;

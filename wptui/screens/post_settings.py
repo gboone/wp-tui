@@ -8,12 +8,14 @@ menu-order for pages.
 
 from __future__ import annotations
 
+from textual import on
 from textual.app import ComposeResult
 from textual.containers import VerticalScroll
 from textual.screen import Screen
 from textual.widgets import Button, Footer, Header, Input, Select, Static
 
 from wptui.api import PostSettings
+from wptui.widgets.term_picker import TermPicker
 
 _STATUS_OPTIONS = [
     ("Draft", "draft"),
@@ -76,6 +78,28 @@ class PostSettingsScreen(Screen[None]):
     def _featured_label(self) -> str:
         fid = self._settings.featured_media
         return f"Featured image: {'#' + str(fid) if fid else 'none'}"
+
+    @on(Button.Pressed, "#set-categories")
+    def _edit_categories(self) -> None:
+        self.app.push_screen(
+            TermPicker("categories", self._settings.categories), self._categories_chosen
+        )
+
+    @on(Button.Pressed, "#set-tags")
+    def _edit_tags(self) -> None:
+        self.app.push_screen(TermPicker("tags", self._settings.tags), self._tags_chosen)
+
+    def _categories_chosen(self, ids: list[int] | None) -> None:
+        if ids is not None:
+            self._settings.categories = ids
+            self.query_one("#set-categories-label", Static).update(
+                f"Categories: {len(ids)} selected"
+            )
+
+    def _tags_chosen(self, ids: list[int] | None) -> None:
+        if ids is not None:
+            self._settings.tags = ids
+            self.query_one("#set-tags-label", Static).update(f"Tags: {len(ids)} selected")
 
     def action_close(self) -> None:
         self._commit()

@@ -76,6 +76,89 @@ async def test_page_shows_hierarchy_fields_and_writes_them_back():
     assert settings.menu_order == 3
 
 
+class TermClient:
+    """Fake client for term picker tests."""
+
+    def __init__(self) -> None:
+        self.created: list[tuple[str, str]] = []
+
+    async def list_terms(self, taxonomy, search=None, **kw):
+        from wptui.api import Term
+
+        rows = [Term(1, "News", "category"), Term(2, "Reviews", "category"), Term(3, "Life", "category")]
+        if search:
+            rows = [t for t in rows if search.lower() in t.name.lower()]
+        return rows
+
+    async def create_term(self, taxonomy, name):
+        from wptui.api import Term
+
+        self.created.append((taxonomy, name))
+        return Term(99, name, "category")
+
+    async def aclose(self):
+        pass
+
+
+@pytest.mark.asyncio
+async def test_term_picker_selects_and_returns_ids():
+    from textual.widgets import SelectionList
+
+    from wptui.widgets.term_picker import TermPicker
+
+    class App2(App):
+        def compose(self):
+            yield from ()
+
+    app = App2()
+    app.client = TermClient()
+    result: dict = {}
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app.push_screen(TermPicker("categories", [1]), lambda ids: result.update(ids=ids))
+        await pilot.pause()
+        await pilot.pause()
+        sl = app.screen.query_one("#term-list", SelectionList)
+        # id 1 came in pre-selected; add id 2 as well.
+        sl.select(2)
+        await pilot.pause()
+        await pilot.press("escape")
+        await pilot.pause()
+    assert result["ids"] == [1, 2]
+
+
+@pytest.mark.asyncio
+async def test_term_picker_creates_new_term():
+    from wptui.widgets.term_picker import TermPicker
+
+    class App2(App):
+        def compose(self):
+            yield from ()
+
+    client = TermClient()
+    app = App2()
+    app.client = client
+    result: dict = {}
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app.push_screen(TermPicker("tags", []), lambda ids: result.update(ids=ids))
+        await pilot.pause()
+        await pilot.pause()
+        from textual.widgets import Input as TInput
+
+        from textual.widgets import Button as TButton
+
+        app.screen.query_one("#term-new", TInput).value = "Fresh"
+        await pilot.pause()
+        app.screen.query_one("#term-add", TButton).press()
+        await pilot.pause()
+        await pilot.pause()
+        await pilot.press("escape")
+        await pilot.pause()
+    assert client.created == [("tags", "Fresh")]
+    assert 99 in result["ids"]  # newly created term is selected
+
+
 @pytest.mark.asyncio
 async def test_editor_ctrl_e_opens_settings():
     from wptui.app import WPTuiApp

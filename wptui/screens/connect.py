@@ -115,12 +115,16 @@ class ConnectScreen(Screen[None]):
         client = WordPressClient(profile, app_password)
         try:
             await client.verify()
+            # Persist for next time (name the profile after the host for now).
+            save_profile(profile, app_password)
         except ApiError as err:
             await client.aclose()
             self._set_status(f"Could not connect: {err}", error=True)
             return
-        # Persist for next time (name the profile after the host for now).
-        save_profile(profile, app_password)
+        except Exception as err:  # keyring/disk failure, etc. — don't leak the client
+            await client.aclose()
+            self._set_status(f"Connection failed: {err}", error=True)
+            return
         self.post_message(self.Connected(client, profile))
 
     def _set_status(self, text: str, *, error: bool = False) -> None:

@@ -52,6 +52,9 @@ class Block:
     :attr:`attributes`, so they get re-encoded."""
     original_raw: str = ""
     """Exact source substring for this block (for freeform blocks, the text itself)."""
+    void: bool = False
+    """True for a self-closing block (``<!-- wp:name /-->``). Tracked explicitly so a
+    dirtied *empty* opener/closer pair rebuilds as a pair, not as a void block."""
     dirty: bool = False
     """True once edited; gates whether serialization rebuilds or re-emits verbatim."""
 

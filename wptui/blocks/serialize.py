@@ -74,11 +74,9 @@ def _rebuild_inner(block: Block) -> str:
 
 
 def _is_void(block: Block) -> bool:
-    return (
-        not block.inner_blocks
-        and not block.inner_content
-        and block.inner_html == ""
-    )
+    # Void-ness is tracked explicitly at parse time, not inferred from emptiness — an
+    # empty opener/closer pair must rebuild as a pair, not collapse to self-closing form.
+    return block.void
 
 
 def _short_name(full_name: str) -> str:

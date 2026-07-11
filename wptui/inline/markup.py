@@ -53,11 +53,17 @@ def _parse_inline(s: str, marks: frozenset[Mark], link: Link | None) -> list[Run
             continue
 
         if c == "`":
-            close = s.find("`", i + 1)
+            fence_end = i
+            while fence_end < len(s) and s[fence_end] == "`":
+                fence_end += 1
+            n = fence_end - i
+            close = _find_code_close(s, fence_end, n)
             if close != -1:
                 flush()
-                runs.append(Run(s[i + 1 : close], marks | {Mark.CODE}, link))
-                i = close + 1
+                runs.append(
+                    Run(_strip_code_padding(s[fence_end:close]), marks | {Mark.CODE}, link)
+                )
+                i = close + n
                 continue
 
         elif c == "[" and link is None:
@@ -101,6 +107,29 @@ def _parse_inline(s: str, marks: frozenset[Mark], link: Link | None) -> list[Run
 
     flush()
     return runs
+
+
+def _find_code_close(s: str, start: int, n: int) -> int:
+    """Index of a closing backtick run of exactly ``n`` backticks at/after ``start``."""
+    i = start
+    while i < len(s):
+        if s[i] == "`":
+            run_end = i
+            while run_end < len(s) and s[run_end] == "`":
+                run_end += 1
+            if run_end - i == n:
+                return i
+            i = run_end
+        else:
+            i += 1
+    return -1
+
+
+def _strip_code_padding(content: str) -> str:
+    """Drop the single space pad a fenced code span uses to hold an edge backtick."""
+    if len(content) >= 2 and content[0] == " " and content[-1] == " " and content.strip():
+        return content[1:-1]
+    return content
 
 
 def _find_close(s: str, start: int, marker: str) -> int:
@@ -184,12 +213,16 @@ def _scan_spans(s: str, base: int, spans: list[tuple[int, int, str]]) -> None:
             continue
 
         if c == "`":
-            close = s.find("`", i + 1)
+            fence_end = i
+            while fence_end < len(s) and s[fence_end] == "`":
+                fence_end += 1
+            n = fence_end - i
+            close = _find_code_close(s, fence_end, n)
             if close != -1:
-                spans.append((base + i, base + i + 1, "marker"))
-                spans.append((base + i + 1, base + close, "code"))
-                spans.append((base + close, base + close + 1, "marker"))
-                i = close + 1
+                spans.append((base + i, base + fence_end, "marker"))
+                spans.append((base + fence_end, base + close, "code"))
+                spans.append((base + close, base + close + n, "marker"))
+                i = close + n
                 continue
 
         elif c == "[":
@@ -252,8 +285,22 @@ def _md_tokens(run: Run, extents: dict[Mark, tuple[int, int]]) -> list[object]:
     tokens: list[object] = []
     if run.link is not None:
         tokens.append(run.link)
-    tokens.extend(ordered_marks(run, extents))
+    # CODE is not a stack marker: its content is literal and needs a variable-length
+    # backtick fence, so it's emitted with the run text, not opened/closed on the stack.
+    tokens.extend(m for m in ordered_marks(run, extents) if m is not Mark.CODE)
     return tokens
+
+
+def _fence_code(text: str) -> str:
+    """Wrap ``text`` in a backtick fence long enough to contain any backticks inside."""
+    longest = current = 0
+    for ch in text:
+        current = current + 1 if ch == "`" else 0
+        longest = max(longest, current)
+    fence = "`" * (longest + 1)
+    if text and (text[0] == "`" or text[-1] == "`"):
+        return f"{fence} {text} {fence}"  # pad so an edge backtick can't fuse the fence
+    return f"{fence}{text}{fence}"
 
 
 def _md_open(token: object) -> str:
@@ -289,8 +336,10 @@ def document_to_markdown(doc: InlineDocument) -> str:
             out.append(_md_open(token))
             stack.append(token)
 
-        if run.raw or Mark.CODE in run.marks:
-            out.append(run.text)  # raw markup / code-span content is literal
+        if run.raw:
+            out.append(run.text)  # raw markup is literal
+        elif Mark.CODE in run.marks:
+            out.append(_fence_code(run.text))  # literal, fenced to survive inner backticks
         else:
             out.append(_escape_md(run.text))
 

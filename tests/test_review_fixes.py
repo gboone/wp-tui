@@ -237,3 +237,92 @@ async def test_connect_refuses_plaintext_http(monkeypatch):
         # Credentials were never sent: no client constructed, still on the connect screen.
         assert connected == []
         assert isinstance(app.screen, ConnectScreen)
+
+
+# --- HTTP status -> exception-type mapping (demoted test gap) ------------------
+
+
+@pytest.mark.parametrize(
+    "status,exc_name",
+    [(401, "AuthError"), (403, "AuthError"), (404, "NotFoundError"), (500, "NetworkError")],
+)
+async def test_status_maps_to_exception_type(status, exc_name):
+    import httpx
+
+    import wptui.api.errors as errors
+
+    client = _mock_client(lambda req: httpx.Response(status, json={"message": "nope"}))
+    with pytest.raises(getattr(errors, exc_name)) as exc:
+        await client.list_posts()
+    assert "nope" in str(exc.value)  # server message surfaced
+    await client.aclose()
+
+
+# --- #16: dirtied empty opener/closer pair stays a pair (not void) -------------
+
+
+def test_dirtied_empty_pair_does_not_become_void():
+    block = parse("<!-- wp:x --><!-- /wp:x -->")[0]
+    block.dirty = True
+    assert serialize([block]) == "<!-- wp:x --><!-- /wp:x -->"
+
+
+def test_parsed_void_block_stays_void_when_dirtied():
+    block = parse('<!-- wp:spacer {"height":20} /-->')[0]
+    block.dirty = True
+    assert serialize([block]) == '<!-- wp:spacer {"height":20} /-->'
+
+
+# --- #15: code span containing backticks round-trips -------------------------
+
+
+@pytest.mark.parametrize(
+    "html",
+    ["<code>a`b</code>", "<code>``x``</code>", "<code>ends`</code>", "<strong><code>bc</code></strong>"],
+)
+def test_code_span_with_backticks_roundtrips(html):
+    doc = html_to_document(html)
+    back = document_to_html(markdown_to_document(document_to_markdown(doc)))
+    assert back == html
+
+
+# --- #14: a second save is ignored while one is in flight --------------------
+
+
+async def test_reentrant_save_is_ignored():
+    from wptui.app import WPTuiApp
+    from wptui.screens.editor import EditorScreen
+
+    class SlowClient:
+        calls = 0
+
+        async def get_post(self, pid):
+            from wptui.api.dto import PostDetail
+
+            return PostDetail(pid, "T", "<!-- wp:paragraph -->\n<p>x</p>\n<!-- /wp:paragraph -->",
+                              "draft", "2026-01-01T00:00:00", "http://x/1")
+
+        async def update_post(self, *a, **k):
+            SlowClient.calls += 1
+            from wptui.api.dto import PostDetail
+
+            return PostDetail(1, "T", "", "draft", "2026-01-02T00:00:00", "http://x/1")
+
+        async def aclose(self):
+            pass
+
+    from wptui.api.dto import PostSummary
+
+    app = WPTuiApp()
+    app.client = SlowClient()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app.push_screen(EditorScreen(PostSummary(1, "T", "draft", "2026-01-01T00:00:00", "http://x/1")))
+        await pilot.pause()
+        await pilot.pause()
+        editor = app.screen
+        editor._saving = True  # simulate a save already in flight
+        editor._save()
+        await pilot.pause()
+        await pilot.pause()
+        assert SlowClient.calls == 0  # the re-entrant save was ignored

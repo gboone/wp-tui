@@ -5,7 +5,9 @@ description = "A terminal UI for editing WordPress posts"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "textual>=8.0",
+    # Capped: InlineMarkdownArea overrides TextArea internals (_build_highlight_map,
+    # _highlights, _line_cache, _replace_via_keyboard) that can change across majors.
+    "textual>=8.0,<9",
     "httpx>=0.27",
     "keyring>=25.0",
     "platformdirs>=4.0",

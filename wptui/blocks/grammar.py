@@ -68,6 +68,7 @@ def parse(document: str) -> list[Block]:
 
         if kind == "void":
             block = _make_block(match, document[token_start:token_end])
+            block.void = True
             if not stack:
                 _emit_leading(document, leading_html_start, token_start, output)
                 output.append(block)

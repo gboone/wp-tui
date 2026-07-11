@@ -68,7 +68,14 @@ def _inline_theme() -> TextAreaTheme:
 
 
 class InlineMarkdownArea(TextArea):
-    """A single-block editor that live-styles inline markdown markers."""
+    """A single-block editor that live-styles inline markdown markers.
+
+    Version-fragile: this overrides Textual internals — ``_build_highlight_map`` (and the
+    ``_highlights`` / ``_line_cache`` it populates), ``_on_key``, ``_on_paste``, and
+    ``_replace_via_keyboard`` — which are not public API. Verified against Textual 8.2.8;
+    the dependency is capped ``<9`` in pyproject. Re-check these seams on any Textual
+    minor/major bump.
+    """
 
     class VimCommand(Message):
         """Bubbled to the editor screen when a ``:`` command runs (e.g. ``:w``)."""

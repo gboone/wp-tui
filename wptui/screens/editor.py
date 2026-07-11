@@ -30,6 +30,7 @@ class EditorScreen(Screen[None]):
         self._summary = summary
         self._modified_gmt: str | None = None
         self._canvas: BlockCanvas | None = None
+        self._saving = False
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -90,11 +91,17 @@ class EditorScreen(Screen[None]):
     def action_save(self) -> None:
         self._save()
 
-    @work(exclusive=True, group="editor-save")
+    @work(group="editor-save")
     async def _save(self) -> None:
         client = self.app.client  # type: ignore[attr-defined]
         if client is None or self._canvas is None:
             return
+        # Ignore a second save while one is in flight rather than cancel-and-restart it:
+        # cancelling a PUT that already committed would re-check with a stale timestamp
+        # and report a false conflict, tempting the user to reload and lose their edits.
+        if self._saving:
+            return
+        self._saving = True
         self._set_status("Saving…")
         try:
             # Building the payload can itself raise (serialization); keep it inside the
@@ -117,6 +124,8 @@ class EditorScreen(Screen[None]):
         except Exception as err:  # never let a save crash the whole TUI
             self._set_status(f"Save failed unexpectedly: {err}", error=True)
             return
+        finally:
+            self._saving = False
         self._modified_gmt = detail.modified_gmt
         self._set_status(f"Saved · modified {detail.modified_gmt}")
 

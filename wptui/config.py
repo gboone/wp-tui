@@ -53,6 +53,10 @@ def _read_raw() -> dict:
 
 def _write_raw(data: dict) -> None:
     _CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    try:
+        _CONFIG_DIR.chmod(0o700)  # profile dir: owner-only
+    except OSError:
+        pass
     lines: list[str] = []
     for name, entry in data.get("profiles", {}).items():
         lines.append(f"[profiles.{_toml_key(name)}]")
@@ -60,6 +64,15 @@ def _write_raw(data: dict) -> None:
             lines.append(f'{key} = "{_toml_escape(entry[key])}"')
         lines.append("")
     _CONFIG_FILE.write_text("\n".join(lines), encoding="utf-8")
+    try:
+        _CONFIG_FILE.chmod(0o600)  # discloses the WordPress username; keep it owner-only
+    except OSError:
+        pass
+
+
+# TOML basic-string escapes for the control characters json/tomllib will otherwise
+# choke on when the file is read back.
+_TOML_ESCAPES = {"\\": "\\\\", '"': '\\"', "\n": "\\n", "\r": "\\r", "\t": "\\t"}
 
 
 def _toml_key(name: str) -> str:
@@ -70,7 +83,15 @@ def _toml_key(name: str) -> str:
 
 
 def _toml_escape(value: str) -> str:
-    return value.replace("\\", "\\\\").replace('"', '\\"')
+    out: list[str] = []
+    for ch in value:
+        if ch in _TOML_ESCAPES:
+            out.append(_TOML_ESCAPES[ch])
+        elif ord(ch) < 0x20:
+            out.append(f"\\u{ord(ch):04x}")
+        else:
+            out.append(ch)
+    return "".join(out)
 
 
 def list_profiles() -> list[SiteProfile]:

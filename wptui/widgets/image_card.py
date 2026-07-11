@@ -8,9 +8,10 @@ canvas treats both uniformly.
 
 from __future__ import annotations
 
+from textual import on
 from textual.app import ComposeResult
 from textual.containers import Vertical
-from textual.widgets import Input, Static
+from textual.widgets import Button, Input, Static
 
 from wptui.blocks.image import get_image_parts, set_image_parts
 from wptui.blocks.model import Block
@@ -42,6 +43,23 @@ class ImageCard(Vertical):
         yield Input(
             value=self._caption, placeholder="caption", id="img-caption", classes="image-field"
         )
+        yield Button("Upload file…", id="img-card-upload", classes="image-field")
+
+    @on(Button.Pressed, "#img-card-upload")
+    def _open_upload(self) -> None:
+        from wptui.widgets.image_upload import ImageUploadModal
+
+        self.app.push_screen(ImageUploadModal(), self._uploaded)
+
+    def _uploaded(self, media) -> None:
+        """Fill this card's fields from a freshly uploaded media item."""
+        if media is None:
+            return
+        self.query_one("#img-src", Input).value = media.source_url
+        if media.alt:
+            self.query_one("#img-alt", Input).value = media.alt
+        if media.caption_raw:
+            self.query_one("#img-caption", Input).value = media.caption_raw
 
     def commit(self) -> None:
         """Write the current field values back into the block if they changed."""

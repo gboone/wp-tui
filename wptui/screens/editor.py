@@ -27,6 +27,7 @@ class EditorScreen(Screen[None]):
         Binding("ctrl+up", "move_up", "Move up", priority=True),
         Binding("ctrl+down", "move_down", "Move down", priority=True),
         Binding("ctrl+n", "insert_paragraph", "New ¶", priority=True),
+        Binding("ctrl+g", "add_image", "Add image", priority=True),
         Binding("ctrl+delete", "delete_block", "Delete block", priority=True),
         ("escape", "app.pop_screen", "Back"),
     ]
@@ -111,6 +112,21 @@ class EditorScreen(Screen[None]):
     async def action_delete_block(self) -> None:
         if self._canvas is not None:
             await self._canvas.delete_focused()
+
+    def action_add_image(self) -> None:
+        """Open the upload modal; on success, insert a new image block."""
+        if self._canvas is None:
+            return
+        from wptui.widgets.image_upload import ImageUploadModal
+
+        self.app.push_screen(ImageUploadModal(), self._image_uploaded)
+
+    def _image_uploaded(self, media) -> None:
+        if media is None or self._canvas is None:
+            return
+        from wptui.blocks.factory import new_image_block
+
+        self.run_worker(self._canvas.insert_block(new_image_block(media)))
 
     def on_inline_markdown_area_vim_command(self, message) -> None:
         """Handle ``:w`` / ``:q`` from a Vim command line."""

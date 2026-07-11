@@ -126,16 +126,19 @@ class BlockCanvas(VerticalScroll):
 
     async def insert_paragraph(self) -> bool:
         """Insert a new empty paragraph after the focused top-level block."""
+        return await self.insert_block(new_paragraph_block())
+
+    async def insert_block(self, new_block: Block) -> bool:
+        """Insert an arbitrary new top-level block after the focused one (or at the end)."""
         block = self._focused_owner()
         self.sync()
-        paragraph = new_paragraph_block()
         if block is None:
             self.blocks.append(separator_freeform())
-            self.blocks.append(paragraph)
+            self.blocks.append(new_block)
         else:
             index = self.blocks.index(block)
-            self.blocks[index + 1 : index + 1] = [separator_freeform(), paragraph]
-        await self._rerender(focus=paragraph)
+            self.blocks[index + 1 : index + 1] = [separator_freeform(), new_block]
+        await self._rerender(focus=new_block)
         return True
 
     # -- helpers ----------------------------------------------------------

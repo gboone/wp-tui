@@ -172,6 +172,30 @@ OpaqueCard {
     margin-bottom: 1;
 }
 
+/* Image upload modal */
+ImageUploadModal {
+    align: center middle;
+}
+
+#upload-modal {
+    width: 64;
+    max-width: 90%;
+    height: auto;
+    padding: 1 2;
+    border: round $success;
+    background: $surface;
+}
+
+.upload-title {
+    text-style: bold;
+    color: $success;
+    margin-bottom: 1;
+}
+
+#upload-modal Input, #upload-modal Button {
+    margin-bottom: 1;
+}
+
 /* Term picker modal */
 TermPicker {
     align: center middle;

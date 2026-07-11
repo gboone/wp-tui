@@ -7,7 +7,7 @@ from typing import Any
 
 import httpx
 
-from wptui.api.dto import PostDetail, PostSummary
+from wptui.api.dto import MediaItem, PostDetail, PostSummary, PostSettings, Term
 from wptui.api.errors import (
     AuthError,
     ConflictError,
@@ -15,6 +15,18 @@ from wptui.api.errors import (
     NotFoundError,
 )
 from wptui.config import SiteProfile
+
+# Fields fetched for an editable post/page (context=edit gives the raw variants).
+_POST_FIELDS = (
+    "id,title,content,status,modified_gmt,link,type,slug,excerpt,date,"
+    "password,categories,tags,featured_media,parent,menu_order,template"
+)
+_TYPE_PATH = {"post": "posts", "page": "pages"}
+
+
+def _type_path(post_type: str) -> str:
+    """REST collection segment for a post type (``post`` -> ``posts``)."""
+    return _TYPE_PATH.get(post_type, "posts")
 
 
 class WordPressClient:
@@ -110,7 +122,7 @@ class WordPressClient:
             "per_page": per_page,
             "orderby": "modified",
             "order": "desc",
-            "_fields": "id,title,status,modified_gmt,link",
+            "_fields": "id,title,status,modified_gmt,link,type",
         }
         if search:
             params["search"] = search
@@ -120,13 +132,29 @@ class WordPressClient:
             raise NetworkError("Expected a list of posts from the server.")
         return [PostSummary.from_json(item) for item in data if isinstance(item, dict)]
 
-    async def get_post(self, post_id: int) -> PostDetail:
-        """Fetch one post with raw, editable block content (``context=edit``)."""
-        params = {
-            "context": "edit",
-            "_fields": "id,title,content,status,modified_gmt,link",
-        }
-        response = await self._request("GET", f"/posts/{post_id}", params=params)
+    async def get_post(self, post_id: int, post_type: str = "post") -> PostDetail:
+        """Fetch one post/page with raw, editable content + settings (``context=edit``)."""
+        params = {"context": "edit", "_fields": _POST_FIELDS}
+        path = _type_path(post_type)
+        response = await self._request("GET", f"/{path}/{post_id}", params=params)
+        return _post_detail(self._json(response))
+
+    async def create_post(
+        self,
+        post_type: str,
+        *,
+        title_raw: str = "",
+        content_raw: str = "",
+        settings: PostSettings | None = None,
+    ) -> PostDetail:
+        """Create a new post/page and return it. No conflict pre-check (nothing exists)."""
+        payload: dict[str, Any] = {"title": title_raw, "content": content_raw}
+        if settings is not None:
+            payload.update(settings.to_payload())
+        payload.setdefault("status", "draft")
+        params = {"context": "edit", "_fields": _POST_FIELDS}
+        path = _type_path(post_type)
+        response = await self._request("POST", f"/{path}", params=params, json=payload)
         return _post_detail(self._json(response))
 
     async def update_post(
@@ -135,16 +163,18 @@ class WordPressClient:
         *,
         content_raw: str | None = None,
         title_raw: str | None = None,
+        settings: PostSettings | None = None,
         expected_modified_gmt: str | None = None,
     ) -> PostDetail:
-        """Update a post's raw content and/or title.
+        """Update a post/page's content, title, and/or settings.
 
         If ``expected_modified_gmt`` is given, re-check the server's current value
         first and raise :class:`ConflictError` if it changed (app-level lost-update
         guard — WordPress posts don't expose strong ETags).
         """
+        post_type = settings.post_type if settings is not None else "post"
         if expected_modified_gmt is not None:
-            current = await self.get_post(post_id)
+            current = await self.get_post(post_id, post_type)
             if current.modified_gmt != expected_modified_gmt:
                 raise ConflictError(
                     "The post was modified on the server since you opened it.",
@@ -156,10 +186,13 @@ class WordPressClient:
             payload["content"] = content_raw
         if title_raw is not None:
             payload["title"] = title_raw
+        if settings is not None:
+            payload.update(settings.to_payload())
 
-        params = {"context": "edit", "_fields": "id,title,content,status,modified_gmt,link"}
+        params = {"context": "edit", "_fields": _POST_FIELDS}
+        path = _type_path(post_type)
         response = await self._request(
-            "POST", f"/posts/{post_id}", params=params, json=payload
+            "POST", f"/{path}/{post_id}", params=params, json=payload
         )
         return _post_detail(self._json(response))
 

@@ -1,7 +1,7 @@
 """WordPress REST API client layer."""
 
 from wptui.api.client import WordPressClient
-from wptui.api.dto import PostDetail, PostSummary
+from wptui.api.dto import MediaItem, PostDetail, PostSettings, PostSummary, Term
 from wptui.api.errors import (
     ApiError,
     AuthError,
@@ -14,6 +14,9 @@ __all__ = [
     "WordPressClient",
     "PostSummary",
     "PostDetail",
+    "PostSettings",
+    "Term",
+    "MediaItem",
     "ApiError",
     "AuthError",
     "ConflictError",

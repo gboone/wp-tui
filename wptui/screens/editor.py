@@ -1,0 +1,121 @@
+"""EditorScreen: open a post, edit its blocks, and save back to WordPress."""
+
+from __future__ import annotations
+
+from textual import work
+from textual.app import ComposeResult
+from textual.binding import Binding
+from textual.screen import Screen
+from textual.widgets import Footer, Header, Input, Static
+
+from wptui.api import ApiError, ConflictError, PostSummary
+from wptui.blocks import parse, serialize
+from wptui.widgets.canvas import BlockCanvas
+
+
+class EditorScreen(Screen[None]):
+    """Edit one post's title and block content."""
+
+    BINDINGS = [
+        ("ctrl+s", "save", "Save"),
+        Binding("ctrl+up", "move_up", "Move up", priority=True),
+        Binding("ctrl+down", "move_down", "Move down", priority=True),
+        Binding("ctrl+n", "insert_paragraph", "New ¶", priority=True),
+        Binding("ctrl+delete", "delete_block", "Delete block", priority=True),
+        ("escape", "app.pop_screen", "Back"),
+    ]
+
+    def __init__(self, summary: PostSummary) -> None:
+        super().__init__()
+        self._summary = summary
+        self._modified_gmt: str | None = None
+        self._canvas: BlockCanvas | None = None
+
+    def compose(self) -> ComposeResult:
+        yield Header()
+        yield Input(placeholder="(title)", id="editor-title")
+        yield Static("Loading…", id="editor-body")
+        yield Static("", id="editor-status")
+        yield Footer()
+
+    def on_mount(self) -> None:
+        self._load()
+
+    @work(exclusive=True)
+    async def _load(self) -> None:
+        client = self.app.client  # type: ignore[attr-defined]
+        if client is None:
+            self._set_status("Not connected.", error=True)
+            return
+        try:
+            detail = await client.get_post(self._summary.id)
+        except ApiError as err:
+            self._set_status(f"Failed to load: {err}", error=True)
+            return
+        self._modified_gmt = detail.modified_gmt
+        self.query_one("#editor-title", Input).value = detail.title_raw
+        blocks = parse(detail.content_raw)
+        canvas = BlockCanvas(blocks)
+        self._canvas = canvas
+        body = self.query_one("#editor-body", Static)
+        await body.remove()
+        await self.mount(canvas, before=self.query_one("#editor-status"))
+        self._set_status(
+            f"status: {detail.status} · {len(blocks)} block(s) · Ctrl+S to save"
+        )
+
+    async def action_move_up(self) -> None:
+        if self._canvas is not None:
+            await self._canvas.move_focused(-1)
+
+    async def action_move_down(self) -> None:
+        if self._canvas is not None:
+            await self._canvas.move_focused(+1)
+
+    async def action_insert_paragraph(self) -> None:
+        if self._canvas is not None:
+            await self._canvas.insert_paragraph()
+
+    async def action_delete_block(self) -> None:
+        if self._canvas is not None:
+            await self._canvas.delete_focused()
+
+    def on_inline_markdown_area_vim_command(self, message) -> None:
+        """Handle ``:w`` / ``:q`` from a Vim command line."""
+        if message.name == "save":
+            self._save()
+        elif message.name == "quit":
+            self.app.pop_screen()
+
+    def action_save(self) -> None:
+        self._save()
+
+    @work(exclusive=True)
+    async def _save(self) -> None:
+        client = self.app.client  # type: ignore[attr-defined]
+        if client is None or self._canvas is None:
+            return
+        self._canvas.sync()
+        content = serialize(self._canvas.blocks)
+        title = self.query_one("#editor-title", Input).value
+        self._set_status("Saving…")
+        try:
+            detail = await client.update_post(
+                self._summary.id,
+                content_raw=content,
+                title_raw=title,
+                expected_modified_gmt=self._modified_gmt,
+            )
+        except ConflictError as err:
+            self._set_status(f"Not saved: {err} Reload to get the latest.", error=True)
+            return
+        except ApiError as err:
+            self._set_status(f"Save failed: {err}", error=True)
+            return
+        self._modified_gmt = detail.modified_gmt
+        self._set_status(f"Saved · modified {detail.modified_gmt}")
+
+    def _set_status(self, text: str, *, error: bool = False) -> None:
+        status = self.query_one("#editor-status", Static)
+        status.update(text)
+        status.set_class(error, "error")

@@ -1,0 +1,75 @@
+<!-- wp:paragraph -->
+<p>Hello world, this is a <strong>paragraph</strong> with <em>emphasis</em> and a <a href="https://example.com">link</a>.</p>
+<!-- /wp:paragraph -->
+
+<!-- wp:heading {"level":2} -->
+<h2 class="wp-block-heading">A heading</h2>
+<!-- /wp:heading -->
+
+<!-- wp:list -->
+<ul class="wp-block-list"><!-- wp:list-item -->
+<li>First item</li>
+<!-- /wp:list-item -->
+
+<!-- wp:list-item -->
+<li>Second item</li>
+<!-- /wp:list-item --></ul>
+<!-- /wp:list -->
+
+<!-- wp:quote -->
+<blockquote class="wp-block-quote"><!-- wp:paragraph -->
+<p>A quoted paragraph.</p>
+<!-- /wp:paragraph --></blockquote>
+<!-- /wp:quote -->
+
+<!-- wp:code -->
+<pre class="wp-block-code"><code>print("hi")</code></pre>
+<!-- /wp:code -->
+
+<!-- wp:separator -->
+<hr class="wp-block-separator has-alpha-channel-opacity"/>
+<!-- /wp:separator -->
+
+<!-- wp:image {"id":42,"sizeSlug":"large","linkDestination":"none"} -->
+<figure class="wp-block-image size-large"><img src="https://example.com/cat.jpg" alt="A cat" class="wp-image-42"/><figcaption class="wp-element-caption">My cat</figcaption></figure>
+<!-- /wp:image -->
+
+<!-- wp:columns -->
+<div class="wp-block-columns"><!-- wp:column -->
+<div class="wp-block-column"><!-- wp:paragraph -->
+<p>Left column, with nested content and a unicode snowman ☃ plus emoji 🎉.</p>
+<!-- /wp:paragraph --></div>
+<!-- /wp:column -->
+
+<!-- wp:column -->
+<div class="wp-block-column"><!-- wp:paragraph -->
+<p>Right column.</p>
+<!-- /wp:paragraph --></div>
+<!-- /wp:column --></div>
+<!-- /wp:columns -->
+
+<!-- wp:gallery {"linkTo":"none"} -->
+<figure class="wp-block-gallery has-nested-images columns-default is-cropped"><!-- wp:image {"id":7} -->
+<figure class="wp-block-image"><img src="https://example.com/1.jpg" alt="" class="wp-image-7"/></figure>
+<!-- /wp:image --></figure>
+<!-- /wp:gallery -->
+
+<!-- wp:embed {"url":"https://youtu.be/abc","type":"video","providerNameSlug":"youtube"} -->
+<figure class="wp-block-embed"><div class="wp-block-embed__wrapper">
+https://youtu.be/abc
+</div></figure>
+<!-- /wp:embed -->
+
+<!-- wp:table -->
+<figure class="wp-block-table"><table><tbody><tr><td>A</td><td>B</td></tr></tbody></table></figure>
+<!-- /wp:table -->
+
+<!-- wp:spacer {"height":"40px"} -->
+<div style="height:40px" aria-hidden="true" class="wp-block-spacer"></div>
+<!-- /wp:spacer -->
+
+<!-- wp:acme/custom-widget {"config":{"nested":{"deep":true},"count":3}} -->
+<div class="acme-widget">Third party block with nested } braces in JSON.</div>
+<!-- /wp:acme/custom-widget -->
+
+<p>Some classic/freeform HTML outside any block.</p>

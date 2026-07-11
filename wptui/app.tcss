@@ -1,0 +1,170 @@
+/* wp-tui styles */
+
+.error {
+    color: $error;
+}
+
+/* Connect screen */
+#connect-box {
+    width: 60;
+    max-width: 90%;
+    height: auto;
+    margin: 2 4;
+    padding: 1 2;
+    border: round $primary;
+}
+
+#connect-title {
+    text-style: bold;
+    margin-bottom: 1;
+}
+
+#connect-box Input,
+#connect-box Select {
+    margin-bottom: 1;
+}
+
+#connect-buttons {
+    height: auto;
+    align-horizontal: right;
+}
+
+#connect-status {
+    margin-top: 1;
+    height: auto;
+}
+
+/* Post list screen */
+#post-search {
+    dock: top;
+}
+
+#post-table {
+    height: 1fr;
+}
+
+#post-status {
+    dock: bottom;
+    height: auto;
+    padding: 0 1;
+    color: $text-muted;
+}
+
+/* Editor screen */
+#editor-title {
+    dock: top;
+    text-style: bold;
+}
+
+#editor-status {
+    dock: bottom;
+    height: auto;
+    padding: 0 1;
+    color: $text-muted;
+}
+
+BlockCanvas {
+    height: 1fr;
+    padding: 0 1;
+}
+
+TextBlockEditor {
+    height: auto;
+    margin-bottom: 1;
+    border-left: wide $primary 30%;
+    padding-left: 1;
+}
+
+.block-label {
+    color: $text-muted;
+    text-style: italic;
+}
+
+.container-label {
+    color: $accent;
+    text-style: bold;
+    margin-bottom: 1;
+}
+
+.separator-rule {
+    color: $text-muted;
+    margin-bottom: 1;
+}
+
+SeparatorCard {
+    height: auto;
+    border-left: wide $secondary 40%;
+    padding-left: 1;
+}
+
+SeparatorCard:focus-within, OpaqueCard:focus, SeparatorCard:focus {
+    border-left: wide $accent;
+}
+
+.nested {
+    margin-left: 2;
+}
+
+ImageCard {
+    height: auto;
+    margin-bottom: 1;
+    border-left: wide $success 40%;
+    padding-left: 1;
+}
+
+ImageCard:focus-within {
+    border-left: wide $success;
+}
+
+.image-label {
+    color: $success;
+    text-style: bold;
+}
+
+.image-field {
+    margin-bottom: 1;
+}
+
+.block-body {
+    height: auto;
+    max-height: 20;
+}
+
+InlineMarkdownArea.vim {
+    border: round $accent;
+}
+
+OpaqueCard {
+    height: auto;
+    margin-bottom: 1;
+    padding: 0 1;
+    border-left: wide $warning 40%;
+    background: $panel;
+}
+
+.opaque-label {
+    color: $warning;
+    text-style: bold;
+}
+
+.opaque-preview {
+    color: $text-muted;
+}
+
+/* View post screen */
+#view-title {
+    dock: top;
+    text-style: bold;
+    padding: 0 1;
+}
+
+#view-content {
+    height: 1fr;
+}
+
+#view-status {
+    dock: bottom;
+    height: auto;
+    padding: 0 1;
+    color: $text-muted;
+}

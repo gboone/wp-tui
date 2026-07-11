@@ -8,13 +8,13 @@ menu-order for pages.
 
 from __future__ import annotations
 
-from textual import on
+from textual import on, work
 from textual.app import ComposeResult
-from textual.containers import VerticalScroll
+from textual.containers import Horizontal, VerticalScroll
 from textual.screen import Screen
 from textual.widgets import Button, Footer, Header, Input, Select, Static
 
-from wptui.api import PostSettings
+from wptui.api import ApiError, PostSettings
 from wptui.widgets.term_picker import TermPicker
 
 _STATUS_OPTIONS = [
@@ -72,12 +72,50 @@ class PostSettingsScreen(Screen[None]):
                 yield Button("Edit tags", id="set-tags")
 
             yield Static(self._featured_label(), id="set-featured-label", classes="settings-label")
-            yield Button("Set featured image", id="set-featured")
+            with Horizontal(id="set-featured-row"):
+                yield Button("Set featured image", id="set-featured")
+                yield Button("Clear", id="set-featured-clear")
         yield Footer()
 
-    def _featured_label(self) -> str:
+    def on_mount(self) -> None:
+        if self._settings.featured_media:
+            self._resolve_featured()
+
+    def _featured_label(self, name: str = "") -> str:
         fid = self._settings.featured_media
-        return f"Featured image: {'#' + str(fid) if fid else 'none'}"
+        if not fid:
+            return "Featured image: none"
+        return f"Featured image: #{fid}" + (f" ({name})" if name else "")
+
+    @work(exclusive=True, group="featured-resolve")
+    async def _resolve_featured(self) -> None:
+        """Resolve the current featured media id to a filename for display."""
+        client = self.app.client  # type: ignore[attr-defined]
+        if client is None:
+            return
+        try:
+            media = await client.get_media(self._settings.featured_media)
+        except ApiError:
+            return
+        name = media.source_url.rsplit("/", 1)[-1] or media.title_raw
+        self.query_one("#set-featured-label", Static).update(self._featured_label(name))
+
+    @on(Button.Pressed, "#set-featured")
+    def _set_featured(self) -> None:
+        from wptui.widgets.image_upload import ImageUploadModal
+
+        self.app.push_screen(ImageUploadModal(), self._featured_chosen)
+
+    def _featured_chosen(self, media) -> None:
+        if media is not None:
+            self._settings.featured_media = media.id
+            name = media.source_url.rsplit("/", 1)[-1]
+            self.query_one("#set-featured-label", Static).update(self._featured_label(name))
+
+    @on(Button.Pressed, "#set-featured-clear")
+    def _clear_featured(self) -> None:
+        self._settings.featured_media = 0
+        self.query_one("#set-featured-label", Static).update(self._featured_label())
 
     @on(Button.Pressed, "#set-categories")
     def _edit_categories(self) -> None:

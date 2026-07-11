@@ -159,6 +159,74 @@ async def test_term_picker_creates_new_term():
     assert 99 in result["ids"]  # newly created term is selected
 
 
+class MediaClient:
+    async def upload_media(self, path, *, title="", alt="", caption="", description=""):
+        from wptui.api import MediaItem
+
+        return MediaItem(77, "https://x/uploads/hero.png", alt=alt, caption_raw=caption)
+
+    async def get_media(self, media_id):
+        from wptui.api import MediaItem
+
+        return MediaItem(media_id, "https://x/uploads/existing.png")
+
+    async def aclose(self):
+        pass
+
+
+@pytest.mark.asyncio
+async def test_set_featured_image_via_upload(tmp_path):
+    from textual.widgets import Button, Input
+
+    from wptui.widgets.image_upload import ImageUploadModal
+
+    real = tmp_path / "hero.png"
+    real.write_bytes(b"img")
+
+    settings = PostSettings(post_type="post")
+    app = Harness(settings)
+    app.client = MediaClient()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app.screen.query_one("#set-featured", Button).press()
+        await pilot.pause()
+        assert isinstance(app.screen, ImageUploadModal)
+        app.screen.query_one("#img-path", Input).value = str(real)
+        await pilot.pause()
+        app.screen.query_one("#img-upload", Button).press()
+        await pilot.pause()
+        await pilot.pause()
+    assert settings.featured_media == 77
+
+
+@pytest.mark.asyncio
+async def test_clear_featured_sets_zero():
+    from textual.widgets import Button
+
+    settings = PostSettings(post_type="post", featured_media=11)
+    app = Harness(settings)
+    app.client = MediaClient()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app.screen.query_one("#set-featured-clear", Button).press()
+        await pilot.pause()
+    assert settings.featured_media == 0
+
+
+@pytest.mark.asyncio
+async def test_featured_display_resolves_filename():
+    from textual.widgets import Static
+
+    settings = PostSettings(post_type="post", featured_media=11)
+    app = Harness(settings)
+    app.client = MediaClient()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.pause()
+        label = str(app.screen.query_one("#set-featured-label", Static).render())
+        assert "existing.png" in label
+
+
 @pytest.mark.asyncio
 async def test_editor_ctrl_e_opens_settings():
     from wptui.app import WPTuiApp

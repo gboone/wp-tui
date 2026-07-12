@@ -121,6 +121,47 @@ async def test_escape_dismisses_none():
 
 
 @pytest.mark.asyncio
+async def test_ctrl_g_select_existing_inserts_block():
+    # The feature: add an inline image by picking an existing library image.
+    from wptui.api.dto import PostDetail, PostSummary
+    from wptui.app import WPTuiApp
+    from wptui.screens.editor import EditorScreen
+    from wptui.widgets.canvas import BlockCanvas
+
+    class Client(MediaClient):
+        async def get_post(self, pid, post_type="post"):
+            return PostDetail(pid, "T", "<!-- wp:paragraph -->\n<p>hi</p>\n<!-- /wp:paragraph -->",
+                              "draft", "2026-01-01T00:00:00", "http://x/1")
+
+        async def aclose(self):
+            pass
+
+    app = WPTuiApp()
+    app.client = Client()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app.push_screen(EditorScreen(PostSummary(1, "T", "draft", "2026-01-01T00:00:00", "http://x/1")))
+        await pilot.pause()
+        await pilot.pause()
+        await pilot.press("ctrl+g")
+        await pilot.pause()
+        await pilot.pause()
+        assert isinstance(app.screen, MediaPickerModal)
+        ol = app.screen.query_one("#media-list", OptionList)
+        ol.focus()
+        ol.highlighted = 0  # the cat (#1)
+        await pilot.press("enter")
+        await pilot.pause()
+        await pilot.pause()
+        canvas = app.screen.query_one(BlockCanvas)
+        images = [b for b in canvas.blocks if b.block_name == "core/image"]
+        assert len(images) == 1
+        from wptui.blocks import serialize
+
+        assert "wp-image-1" in serialize([images[0]])  # references the picked media id
+
+
+@pytest.mark.asyncio
 async def test_empty_library_shows_status_and_upload_available():
     app = _Harness(MediaClient(items=[]))
     result: dict = {}

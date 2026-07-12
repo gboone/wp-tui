@@ -109,9 +109,9 @@ class PostSettingsScreen(Screen[None]):
 
     @on(Button.Pressed, "#set-featured")
     def _set_featured(self) -> None:
-        from wptui.widgets.image_upload import ImageUploadModal
+        from wptui.widgets.media_picker import MediaPickerModal
 
-        self.app.push_screen(ImageUploadModal(), self._featured_chosen)
+        self.app.push_screen(MediaPickerModal(), self._featured_chosen)
 
     def _featured_chosen(self, media) -> None:
         if media is not None:

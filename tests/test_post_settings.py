@@ -173,6 +173,11 @@ async def test_term_picker_creates_new_term():
 
 
 class MediaClient:
+    async def list_media(self, search=None, *, per_page=30):
+        from wptui.api import MediaItem
+
+        return [MediaItem(77, "https://x/uploads/hero.png", alt="hero", mime="image/png")]
+
     async def upload_media(self, path, *, title="", alt="", caption="", description=""):
         from wptui.api import MediaItem
 
@@ -188,13 +193,11 @@ class MediaClient:
 
 
 @pytest.mark.asyncio
-async def test_set_featured_image_via_upload(tmp_path):
-    from textual.widgets import Button, Input
+async def test_set_featured_image_from_library():
+    # The feature: set a featured image by picking an existing library image (no re-upload).
+    from textual.widgets import Button, OptionList
 
-    from wptui.widgets.image_upload import ImageUploadModal
-
-    real = tmp_path / "hero.png"
-    real.write_bytes(b"img")
+    from wptui.widgets.media_picker import MediaPickerModal
 
     settings = PostSettings(post_type="post")
     app = Harness(settings)
@@ -203,11 +206,12 @@ async def test_set_featured_image_via_upload(tmp_path):
         await pilot.pause()
         app.screen.query_one("#set-featured", Button).press()
         await pilot.pause()
-        assert isinstance(app.screen, ImageUploadModal)
-        app.screen.query_one("#img-path", Input).value = str(real)
         await pilot.pause()
-        app.screen.query_one("#img-upload", Button).press()
-        await pilot.pause()
+        assert isinstance(app.screen, MediaPickerModal)
+        ol = app.screen.query_one("#media-list", OptionList)
+        ol.focus()
+        ol.highlighted = 0
+        await pilot.press("enter")
         await pilot.pause()
     assert settings.featured_media == 77
 

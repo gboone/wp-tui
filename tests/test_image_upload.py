@@ -147,11 +147,14 @@ async def test_modal_upload_failure_keeps_modal_open(tmp_path):
 
 @pytest.mark.asyncio
 async def test_ctrl_g_inserts_uploaded_image_block(tmp_path):
+    # Ctrl+G now opens the media picker; "Upload new file…" reaches the upload modal,
+    # and the uploaded image is inserted as a block (the pre-existing path, one hop deeper).
     from wptui.api.dto import PostDetail, PostSummary
     from wptui.app import WPTuiApp
     from wptui.screens.editor import EditorScreen
     from wptui.widgets.canvas import BlockCanvas
     from wptui.widgets.image_upload import ImageUploadModal
+    from wptui.widgets.media_picker import MediaPickerModal
 
     real = tmp_path / "x.png"
     real.write_bytes(b"img")
@@ -161,6 +164,9 @@ async def test_ctrl_g_inserts_uploaded_image_block(tmp_path):
             return PostDetail(pid, "T", "<!-- wp:paragraph -->\n<p>hi</p>\n<!-- /wp:paragraph -->",
                               "draft", "2026-01-01T00:00:00", "http://x/1")
 
+        async def list_media(self, search=None, *, per_page=30):
+            return []  # empty library — force the upload path
+
     app = WPTuiApp()
     app.client = Client()
     async with app.run_test() as pilot:
@@ -169,6 +175,10 @@ async def test_ctrl_g_inserts_uploaded_image_block(tmp_path):
         await pilot.pause()
         await pilot.pause()
         await pilot.press("ctrl+g")
+        await pilot.pause()
+        await pilot.pause()
+        assert isinstance(app.screen, MediaPickerModal)
+        app.screen.query_one("#media-upload", Button).press()
         await pilot.pause()
         assert isinstance(app.screen, ImageUploadModal)
         app.screen.query_one("#img-path", Input).value = str(real)

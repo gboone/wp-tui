@@ -114,12 +114,12 @@ class EditorScreen(Screen[None]):
             await self._canvas.delete_focused()
 
     def action_add_image(self) -> None:
-        """Open the upload modal; on success, insert a new image block."""
+        """Open the media picker; on selection, insert a new image block."""
         if self._canvas is None:
             return
-        from wptui.widgets.image_upload import ImageUploadModal
+        from wptui.widgets.media_picker import MediaPickerModal
 
-        self.app.push_screen(ImageUploadModal(), self._image_uploaded)
+        self.app.push_screen(MediaPickerModal(), self._image_uploaded)
 
     def _image_uploaded(self, media) -> None:
         if media is None or self._canvas is None:

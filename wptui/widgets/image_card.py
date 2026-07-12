@@ -43,16 +43,16 @@ class ImageCard(Vertical):
         yield Input(
             value=self._caption, placeholder="caption", id="img-caption", classes="image-field"
         )
-        yield Button("Upload file…", id="img-card-upload", classes="image-field")
+        yield Button("Choose image…", id="img-card-upload", classes="image-field")
 
     @on(Button.Pressed, "#img-card-upload")
     def _open_upload(self) -> None:
-        from wptui.widgets.image_upload import ImageUploadModal
+        from wptui.widgets.media_picker import MediaPickerModal
 
-        self.app.push_screen(ImageUploadModal(), self._uploaded)
+        self.app.push_screen(MediaPickerModal(), self._uploaded)
 
     def _uploaded(self, media) -> None:
-        """Fill this card's fields from a freshly uploaded media item."""
+        """Fill this card's fields from a chosen/uploaded media item."""
         if media is None:
             return
         self.query_one("#img-src", Input).value = media.source_url

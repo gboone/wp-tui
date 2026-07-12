@@ -66,9 +66,11 @@ class ImageUploadModal(ModalScreen[MediaItem]):
                 description=self.query_one("#img-desc", Input).value,
             )
         except ApiError as err:
-            status.update(f"Upload failed: {err}")
+            if self.is_mounted:
+                status.update(f"Upload failed: {err}")
             return
-        self.dismiss(media)
+        if self.is_mounted:  # modal may have been cancelled mid-upload
+            self.dismiss(media)
 
     def action_cancel(self) -> None:
         self.dismiss(None)

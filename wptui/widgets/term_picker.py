@@ -49,7 +49,10 @@ class TermPicker(ModalScreen[list[int]]):
         try:
             terms = await client.list_terms(self._taxonomy, search)
         except ApiError as err:
-            self.query_one("#term-status", Static).update(f"Failed to load: {err}")
+            if self.is_mounted:
+                self.query_one("#term-status", Static).update(f"Failed to load: {err}")
+            return
+        if not self.is_mounted:  # picker dismissed while loading
             return
         sl = self.query_one("#term-list", SelectionList)
         sl.clear_options()
@@ -81,7 +84,10 @@ class TermPicker(ModalScreen[list[int]]):
         try:
             term = await client.create_term(self._taxonomy, name)
         except ApiError as err:
-            self.query_one("#term-status", Static).update(f"Failed to add: {err}")
+            if self.is_mounted:
+                self.query_one("#term-status", Static).update(f"Failed to add: {err}")
+            return
+        if not self.is_mounted:
             return
         sl = self.query_one("#term-list", SelectionList)
         sl.add_option((term.name, term.id, True))

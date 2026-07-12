@@ -133,13 +133,16 @@ async def test_malformed_create_response_raises_apierror():
 # ------------------------------------------------------------- payload shaping
 
 
-def test_settings_to_payload_omits_empty_strings_but_keeps_ids():
+def test_settings_to_payload_sends_clearable_fields():
+    # slug/excerpt/password are sent even when empty so the user can *clear* them
+    # (removing a password must be able to lift protection). date is omitted when empty.
     s = PostSettings(post_type="post", status="draft", featured_media=0)
     payload = s.to_payload()
     assert payload["status"] == "draft"
     assert payload["featured_media"] == 0
     assert payload["categories"] == [] and payload["tags"] == []
-    assert "slug" not in payload and "password" not in payload and "excerpt" not in payload
+    assert payload["slug"] == "" and payload["excerpt"] == "" and payload["password"] == ""
+    assert "date" not in payload
 
 
 # ------------------------------------------------------------------- media (U2)

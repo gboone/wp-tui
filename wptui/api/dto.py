@@ -115,23 +115,23 @@ class PostSettings:
         )
 
     def to_payload(self) -> dict[str, Any]:
-        # Always send status, featured_media, and the type's id/list fields (all seeded
-        # from load, so sending them back is idempotent and lets the user clear them).
-        # String fields are sent only when non-empty so partial state can't wipe them.
-        payload: dict[str, Any] = {"status": self.status, "featured_media": self.featured_media}
-        if self.slug:
-            payload["slug"] = self.slug
-        if self.excerpt_raw:
-            payload["excerpt"] = self.excerpt_raw
+        # Every field here is seeded from the loaded post, so sending it back is
+        # idempotent — and sending it even when empty is what lets the user *clear* it
+        # (notably removing a password / excerpt / slug). ``date`` is the exception: it's
+        # omitted when empty so a new post defaults to "now" rather than being rejected.
+        payload: dict[str, Any] = {
+            "status": self.status,
+            "slug": self.slug,
+            "excerpt": self.excerpt_raw,
+            "password": self.password,
+            "featured_media": self.featured_media,
+        }
         if self.date:
             payload["date"] = self.date
-        if self.password:
-            payload["password"] = self.password
         if self.post_type == "page":
             payload["parent"] = self.parent
             payload["menu_order"] = self.menu_order
-            if self.template:
-                payload["template"] = self.template
+            payload["template"] = self.template
         else:
             payload["categories"] = list(self.categories)
             payload["tags"] = list(self.tags)

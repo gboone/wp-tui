@@ -43,8 +43,13 @@ class PostSettingsScreen(Screen[None]):
             yield Static(f"{s.post_type.title()} settings", classes="settings-title")
 
             yield Static("Status", classes="settings-label")
-            status = s.status if s.status in _STATUS_VALUES else "draft"
-            yield Select(_STATUS_OPTIONS, value=status, allow_blank=False, id="set-status")
+            status = s.status or "draft"
+            options = list(_STATUS_OPTIONS)
+            if status not in _STATUS_VALUES:
+                # Preserve a status the form doesn't list (e.g. "future" for a scheduled
+                # post) so escaping the screen can't silently downgrade it to draft.
+                options.append((status.replace("_", " ").title(), status))
+            yield Select(options, value=status, allow_blank=False, id="set-status")
 
             yield Static("Password (optional — protects the post)", classes="settings-label")
             yield Input(value=s.password, password=True, id="set-password")
@@ -96,6 +101,8 @@ class PostSettingsScreen(Screen[None]):
         try:
             media = await client.get_media(self._settings.featured_media)
         except ApiError:
+            return
+        if not self.is_mounted:  # screen popped while the fetch was in flight
             return
         name = media.source_url.rsplit("/", 1)[-1] or media.title_raw
         self.query_one("#set-featured-label", Static).update(self._featured_label(name))

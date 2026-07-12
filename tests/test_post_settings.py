@@ -44,6 +44,19 @@ async def test_editing_fields_writes_back_to_settings():
 
 
 @pytest.mark.asyncio
+async def test_scheduled_status_is_preserved_through_settings():
+    # Opening settings on a "future" (scheduled) post and escaping must NOT downgrade it.
+    settings = PostSettings(post_type="post", status="future")
+    app = Harness(settings)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("escape")
+        await pilot.pause()
+    assert settings.status == "future"
+    assert settings.to_payload()["status"] == "future"
+
+
+@pytest.mark.asyncio
 async def test_post_shows_taxonomy_fields_not_page_fields():
     app = Harness(PostSettings(post_type="post"))
     async with app.run_test() as pilot:

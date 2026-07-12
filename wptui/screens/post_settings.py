@@ -29,6 +29,11 @@ _STATUS_VALUES = {value for _label, value in _STATUS_OPTIONS}
 class PostSettingsScreen(Screen[None]):
     """A form over one post/page's editable settings."""
 
+    # The featured-image button row must claim its real (bordered, height-3) height, or
+    # it collapses to 1 in the scroll container and the form can't scroll far enough to
+    # reveal it. Kept on the screen so it applies regardless of the app stylesheet.
+    DEFAULT_CSS = "#set-featured-row { height: auto; }"
+
     BINDINGS = [("escape", "close", "Done")]
 
     def __init__(self, settings: PostSettings) -> None:

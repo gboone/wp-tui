@@ -44,6 +44,32 @@ async def test_editing_fields_writes_back_to_settings():
 
 
 @pytest.mark.asyncio
+async def test_featured_row_is_not_collapsed_and_scrolls_fully_into_view():
+    # Regression: the featured-image button row must claim its real height (3, for the
+    # bordered buttons) so the settings form can scroll far enough to reveal it.
+    from textual.containers import VerticalScroll
+    from textual.widgets import Button
+
+    settings = PostSettings(post_type="post")
+    app = Harness(settings)
+    async with app.run_test(size=(60, 14)) as pilot:  # short window forces overflow
+        await pilot.pause()
+        await pilot.pause()
+        row = app.screen.query_one("#set-featured-row")
+        assert row.outer_size.height >= 3, "featured-image button row collapsed (buttons clipped)"
+
+        form = app.screen.query_one("#settings-form", VerticalScroll)
+        button = app.screen.query_one("#set-featured", Button)
+        button.focus()
+        for _ in range(5):
+            await pilot.pause()
+        reg, vp = button.region, form.content_region
+        assert reg.y >= vp.y and reg.y + reg.height <= vp.y + vp.height, (
+            "featured-image button not fully scrolled into view"
+        )
+
+
+@pytest.mark.asyncio
 async def test_scheduled_status_is_preserved_through_settings():
     # Opening settings on a "future" (scheduled) post and escaping must NOT downgrade it.
     settings = PostSettings(post_type="post", status="future")

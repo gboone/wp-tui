@@ -110,6 +110,41 @@ async def test_paste_non_url_over_selection_is_normal():
         assert area.text.startswith("plain text")
 
 
+@pytest.mark.asyncio
+async def test_paste_not_duplicated_through_event_dispatch():
+    # Regression: Paste bubbles and the Screen re-forwards it to the focused widget, so a
+    # handler that doesn't stop the event inserts the pasted text twice. Post a REAL Paste
+    # (not a direct _on_paste call) so the dispatch-doubling is exercised.
+    app = Harness()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        area = app.query_one("#a", InlineMarkdownArea)
+        area.focus()
+        area.text = "[example link]()"
+        area.move_cursor((0, 15))  # between the parens, no selection
+        await pilot.pause()
+        area.post_message(events.Paste("https://example.com"))
+        await pilot.pause()
+        await pilot.pause()
+        assert area.text == "[example link](https://example.com)"
+
+
+@pytest.mark.asyncio
+async def test_plain_paste_not_duplicated_through_event_dispatch():
+    app = Harness()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        area = app.query_one("#a", InlineMarkdownArea)
+        area.focus()
+        area.text = ""
+        area.move_cursor((0, 0))
+        await pilot.pause()
+        area.post_message(events.Paste("hello"))
+        await pilot.pause()
+        await pilot.pause()
+        assert area.text == "hello"
+
+
 # ----------------------------------------------------------------------- vim
 
 

@@ -233,6 +233,41 @@ async def test_list_terms_searches_taxonomy_route():
     await client.aclose()
 
 
+async def test_list_media_lists_images_recent_first():
+    captured = {}
+
+    def handler(req):
+        captured["url"] = str(req.url)
+        return httpx.Response(200, json=[MEDIA_JSON, {**MEDIA_JSON, "id": 32}])
+
+    client = _client(handler)
+    items = await client.list_media()
+    assert "/wp/v2/media" in captured["url"]
+    assert "media_type=image" in captured["url"] and "orderby=date" in captured["url"]
+    assert [m.id for m in items] == [31, 32]
+    assert all(isinstance(m, MediaItem) for m in items)
+    await client.aclose()
+
+
+async def test_list_media_search_and_shape_guards():
+    def handler(req):
+        assert "search=cat" in str(req.url)
+        # A list with a non-dict entry is tolerated (skipped), not crashed.
+        return httpx.Response(200, json=[MEDIA_JSON, "junk"])
+
+    client = _client(handler)
+    items = await client.list_media("cat")
+    assert [m.id for m in items] == [31]
+    await client.aclose()
+
+
+async def test_list_media_non_list_raises():
+    client = _client(lambda req: httpx.Response(200, json={"code": "rest_error"}))
+    with pytest.raises(ApiError):
+        await client.list_media()
+    await client.aclose()
+
+
 async def test_create_term_posts_name_and_returns_term():
     captured = {}
 

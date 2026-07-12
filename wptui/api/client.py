@@ -262,6 +262,26 @@ class WordPressClient:
         response = await self._request("GET", f"/media/{media_id}", params=params)
         return _media_item(self._json(response))
 
+    async def list_media(
+        self, search: str | None = None, *, per_page: int = 30
+    ) -> list[MediaItem]:
+        """List recent library images (newest first), optionally filtered by ``search``."""
+        params: dict[str, Any] = {
+            "context": "edit",
+            "media_type": "image",
+            "orderby": "date",
+            "order": "desc",
+            "per_page": per_page,
+            "_fields": "id,source_url,alt_text,caption,title,mime_type",
+        }
+        if search:
+            params["search"] = search
+        response = await self._request("GET", "/media", params=params)
+        data = self._json(response)
+        if not isinstance(data, list):
+            raise NetworkError("Expected a list of media items from the server.")
+        return [MediaItem.from_json(m) for m in data if isinstance(m, dict)]
+
     # -- taxonomy terms -----------------------------------------------------
 
     async def list_terms(

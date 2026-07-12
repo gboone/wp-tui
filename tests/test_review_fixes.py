@@ -296,7 +296,7 @@ async def test_reentrant_save_is_ignored():
     class SlowClient:
         calls = 0
 
-        async def get_post(self, pid):
+        async def get_post(self, pid, post_type="post"):
             from wptui.api.dto import PostDetail
 
             return PostDetail(pid, "T", "<!-- wp:paragraph -->\n<p>x</p>\n<!-- /wp:paragraph -->",

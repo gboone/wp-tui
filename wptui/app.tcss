@@ -151,6 +151,112 @@ OpaqueCard {
     color: $text-muted;
 }
 
+/* Post settings screen */
+#settings-form {
+    height: 1fr;
+    padding: 1 2;
+}
+
+.settings-title {
+    text-style: bold;
+    color: $accent;
+    margin-bottom: 1;
+}
+
+.settings-label {
+    color: $text-muted;
+    margin-top: 1;
+}
+
+#settings-form Input, #settings-form Select, #settings-form Button {
+    margin-bottom: 1;
+}
+
+/* Image upload modal */
+ImageUploadModal {
+    align: center middle;
+}
+
+#upload-modal {
+    width: 64;
+    max-width: 90%;
+    height: auto;
+    padding: 1 2;
+    border: round $success;
+    background: $surface;
+}
+
+.upload-title {
+    text-style: bold;
+    color: $success;
+    margin-bottom: 1;
+}
+
+#upload-modal Input, #upload-modal Button {
+    margin-bottom: 1;
+}
+
+/* Media picker modal */
+MediaPickerModal {
+    align: center middle;
+}
+
+#media-picker {
+    width: 70;
+    max-width: 90%;
+    height: auto;
+    max-height: 80%;
+    padding: 1 2;
+    border: round $success;
+    background: $surface;
+}
+
+.media-title {
+    text-style: bold;
+    color: $success;
+    margin-bottom: 1;
+}
+
+#media-list {
+    height: auto;
+    max-height: 15;
+    margin-bottom: 1;
+}
+
+#media-picker Input, #media-picker Button {
+    margin-bottom: 1;
+}
+
+/* Term picker modal */
+TermPicker {
+    align: center middle;
+}
+
+#term-picker {
+    width: 60;
+    max-width: 90%;
+    height: auto;
+    max-height: 80%;
+    padding: 1 2;
+    border: round $primary;
+    background: $surface;
+}
+
+.term-title {
+    text-style: bold;
+    margin-bottom: 1;
+}
+
+#term-list {
+    height: auto;
+    max-height: 15;
+    margin-bottom: 1;
+}
+
+#term-add-row {
+    height: auto;
+}
+
 /* View post screen */
 #view-title {
     dock: top;

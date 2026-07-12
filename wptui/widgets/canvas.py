@@ -126,16 +126,19 @@ class BlockCanvas(VerticalScroll):
 
     async def insert_paragraph(self) -> bool:
         """Insert a new empty paragraph after the focused top-level block."""
+        return await self.insert_block(new_paragraph_block())
+
+    async def insert_block(self, new_block: Block) -> bool:
+        """Insert an arbitrary new top-level block after the focused one (or at the end)."""
         block = self._focused_owner()
         self.sync()
-        paragraph = new_paragraph_block()
         if block is None:
             self.blocks.append(separator_freeform())
-            self.blocks.append(paragraph)
+            self.blocks.append(new_block)
         else:
             index = self.blocks.index(block)
-            self.blocks[index + 1 : index + 1] = [separator_freeform(), paragraph]
-        await self._rerender(focus=paragraph)
+            self.blocks[index + 1 : index + 1] = [separator_freeform(), new_block]
+        await self._rerender(focus=new_block)
         return True
 
     # -- helpers ----------------------------------------------------------
@@ -172,16 +175,29 @@ class BlockCanvas(VerticalScroll):
     def _restore_focus(self, target: Block | None) -> None:
         if target is None:
             return
+        focus_target = self._focus_widget_for(target)
+        if focus_target is None:
+            return
+        focus_target.focus()
+        # focus() schedules a scroll-into-view, but right after a recompose the new
+        # widget isn't laid out yet, so that scroll evaluates a stale region and skips.
+        # Re-scroll once layout has settled.
+        self.call_after_refresh(self._scroll_into_view, focus_target)
+
+    def _focus_widget_for(self, target: Block) -> Widget | None:
+        """The widget that should receive focus for a top-level block (inner field first)."""
         for widget, owner in self._owner.items():
             if isinstance(widget, TextBlockEditor) and widget.block is target:
-                widget.query_one("#body").focus()
-                return
+                return widget.query_one("#body")
             if isinstance(widget, ImageCard) and widget.block is target:
-                widget.query_one("#img-src").focus()
-                return
+                return widget.query_one("#img-src")
             if owner is target:
-                widget.focus()
-                return
+                return widget
+        return None
+
+    def _scroll_into_view(self, widget: Widget) -> None:
+        if widget.is_mounted:
+            widget.scroll_visible(animate=False)
 
 
 def _classify(block: Block) -> str:

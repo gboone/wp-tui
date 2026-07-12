@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import mimetypes
+from pathlib import Path
 from types import TracebackType
 from typing import Any
 
 import httpx
 
-from wptui.api.dto import PostDetail, PostSummary
+from wptui.api.dto import MediaItem, PostDetail, PostSummary, PostSettings, Term
 from wptui.api.errors import (
     AuthError,
     ConflictError,
@@ -15,6 +17,39 @@ from wptui.api.errors import (
     NotFoundError,
 )
 from wptui.config import SiteProfile
+
+# Fields fetched for an editable post/page (context=edit gives the raw variants).
+_POST_FIELDS = (
+    "id,title,content,status,modified_gmt,link,type,slug,excerpt,date,"
+    "password,categories,tags,featured_media,parent,menu_order,template"
+)
+_TYPE_PATH = {"post": "posts", "page": "pages"}
+
+
+def _type_path(post_type: str) -> str:
+    """REST collection segment for a post type (``post`` -> ``posts``)."""
+    return _TYPE_PATH.get(post_type, "posts")
+
+
+_IMAGE_MIME = {
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".gif": "image/gif",
+    ".webp": "image/webp",
+    ".svg": "image/svg+xml",
+    ".bmp": "image/bmp",
+    ".tif": "image/tiff",
+    ".tiff": "image/tiff",
+}
+
+
+def _guess_mime(filename: str) -> str:
+    ext = Path(filename).suffix.lower()
+    if ext in _IMAGE_MIME:
+        return _IMAGE_MIME[ext]
+    guessed, _ = mimetypes.guess_type(filename)
+    return guessed or "application/octet-stream"
 
 
 class WordPressClient:
@@ -110,7 +145,7 @@ class WordPressClient:
             "per_page": per_page,
             "orderby": "modified",
             "order": "desc",
-            "_fields": "id,title,status,modified_gmt,link",
+            "_fields": "id,title,status,modified_gmt,link,type",
         }
         if search:
             params["search"] = search
@@ -120,13 +155,29 @@ class WordPressClient:
             raise NetworkError("Expected a list of posts from the server.")
         return [PostSummary.from_json(item) for item in data if isinstance(item, dict)]
 
-    async def get_post(self, post_id: int) -> PostDetail:
-        """Fetch one post with raw, editable block content (``context=edit``)."""
-        params = {
-            "context": "edit",
-            "_fields": "id,title,content,status,modified_gmt,link",
-        }
-        response = await self._request("GET", f"/posts/{post_id}", params=params)
+    async def get_post(self, post_id: int, post_type: str = "post") -> PostDetail:
+        """Fetch one post/page with raw, editable content + settings (``context=edit``)."""
+        params = {"context": "edit", "_fields": _POST_FIELDS}
+        path = _type_path(post_type)
+        response = await self._request("GET", f"/{path}/{post_id}", params=params)
+        return _post_detail(self._json(response))
+
+    async def create_post(
+        self,
+        post_type: str,
+        *,
+        title_raw: str = "",
+        content_raw: str = "",
+        settings: PostSettings | None = None,
+    ) -> PostDetail:
+        """Create a new post/page and return it. No conflict pre-check (nothing exists)."""
+        payload: dict[str, Any] = {"title": title_raw, "content": content_raw}
+        if settings is not None:
+            payload.update(settings.to_payload())
+        payload.setdefault("status", "draft")
+        params = {"context": "edit", "_fields": _POST_FIELDS}
+        path = _type_path(post_type)
+        response = await self._request("POST", f"/{path}", params=params, json=payload)
         return _post_detail(self._json(response))
 
     async def update_post(
@@ -135,16 +186,18 @@ class WordPressClient:
         *,
         content_raw: str | None = None,
         title_raw: str | None = None,
+        settings: PostSettings | None = None,
         expected_modified_gmt: str | None = None,
     ) -> PostDetail:
-        """Update a post's raw content and/or title.
+        """Update a post/page's content, title, and/or settings.
 
         If ``expected_modified_gmt`` is given, re-check the server's current value
         first and raise :class:`ConflictError` if it changed (app-level lost-update
         guard — WordPress posts don't expose strong ETags).
         """
+        post_type = settings.post_type if settings is not None else "post"
         if expected_modified_gmt is not None:
-            current = await self.get_post(post_id)
+            current = await self.get_post(post_id, post_type)
             if current.modified_gmt != expected_modified_gmt:
                 raise ConflictError(
                     "The post was modified on the server since you opened it.",
@@ -156,12 +209,108 @@ class WordPressClient:
             payload["content"] = content_raw
         if title_raw is not None:
             payload["title"] = title_raw
+        if settings is not None:
+            payload.update(settings.to_payload())
 
-        params = {"context": "edit", "_fields": "id,title,content,status,modified_gmt,link"}
+        params = {"context": "edit", "_fields": _POST_FIELDS}
+        path = _type_path(post_type)
         response = await self._request(
-            "POST", f"/posts/{post_id}", params=params, json=payload
+            "POST", f"/{path}/{post_id}", params=params, json=payload
         )
         return _post_detail(self._json(response))
+
+    # -- media --------------------------------------------------------------
+
+    async def upload_media(
+        self,
+        file_path: str,
+        *,
+        title: str = "",
+        alt: str = "",
+        caption: str = "",
+        description: str = "",
+        timeout: float = 120.0,
+    ) -> MediaItem:
+        """Upload a local file to the media library in one multipart request.
+
+        Uses an extended timeout since media POSTs can be large. Raises
+        :class:`NetworkError` if the file can't be read or the server rejects it.
+        """
+        path = Path(file_path)
+        try:
+            data = path.read_bytes()
+        except OSError as err:
+            raise NetworkError(f"Cannot read file '{file_path}': {err}") from err
+        files = {"file": (path.name, data, _guess_mime(path.name))}
+        form: dict[str, str] = {}
+        if title:
+            form["title"] = title
+        if alt:
+            form["alt_text"] = alt
+        if caption:
+            form["caption"] = caption
+        if description:
+            form["description"] = description
+        response = await self._request(
+            "POST", "/media", files=files, data=form, timeout=timeout
+        )
+        return _media_item(self._json(response))
+
+    async def get_media(self, media_id: int) -> MediaItem:
+        """Fetch one media item (used to resolve a featured image for display)."""
+        params = {"context": "edit", "_fields": "id,source_url,alt_text,caption,title,mime_type"}
+        response = await self._request("GET", f"/media/{media_id}", params=params)
+        return _media_item(self._json(response))
+
+    async def list_media(
+        self, search: str | None = None, *, per_page: int = 30
+    ) -> list[MediaItem]:
+        """List recent library images (newest first), optionally filtered by ``search``."""
+        params: dict[str, Any] = {
+            "context": "edit",
+            "media_type": "image",
+            "orderby": "date",
+            "order": "desc",
+            "per_page": per_page,
+            "_fields": "id,source_url,alt_text,caption,title,mime_type",
+        }
+        if search:
+            params["search"] = search
+        response = await self._request("GET", "/media", params=params)
+        data = self._json(response)
+        if not isinstance(data, list):
+            raise NetworkError("Expected a list of media items from the server.")
+        return [MediaItem.from_json(m) for m in data if isinstance(m, dict)]
+
+    # -- taxonomy terms -----------------------------------------------------
+
+    async def list_terms(
+        self, taxonomy: str, search: str | None = None, *, per_page: int = 50
+    ) -> list[Term]:
+        """List terms for a taxonomy REST route (``categories`` or ``tags``)."""
+        params: dict[str, Any] = {
+            "context": "edit",
+            "per_page": per_page,
+            "_fields": "id,name,taxonomy",
+            "orderby": "count",
+            "order": "desc",
+        }
+        if search:
+            params["search"] = search
+        response = await self._request("GET", f"/{taxonomy}", params=params)
+        data = self._json(response)
+        if not isinstance(data, list):
+            raise NetworkError("Expected a list of terms from the server.")
+        return [Term.from_json(t) for t in data if isinstance(t, dict)]
+
+    async def create_term(self, taxonomy: str, name: str) -> Term:
+        """Create a new term in a taxonomy and return it."""
+        params = {"context": "edit", "_fields": "id,name,taxonomy"}
+        response = await self._request("POST", f"/{taxonomy}", params=params, json={"name": name})
+        data = self._json(response)
+        if not isinstance(data, dict) or "id" not in data:
+            raise NetworkError("Unexpected response creating a term.")
+        return Term.from_json(data)
 
 
 def _post_detail(data: Any) -> PostDetail:
@@ -169,6 +318,13 @@ def _post_detail(data: Any) -> PostDetail:
     if not isinstance(data, dict) or "id" not in data:
         raise NetworkError("Unexpected response shape for a post.")
     return PostDetail.from_json(data)
+
+
+def _media_item(data: Any) -> MediaItem:
+    """Build a MediaItem, rejecting an unexpected body shape as a NetworkError."""
+    if not isinstance(data, dict) or "id" not in data:
+        raise NetworkError("Unexpected response shape for a media item.")
+    return MediaItem.from_json(data)
 
 
 def _raise_for_status(response: httpx.Response) -> None:

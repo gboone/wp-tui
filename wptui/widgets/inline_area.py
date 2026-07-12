@@ -180,6 +180,10 @@ class InlineMarkdownArea(TextArea):
             if result is not None:
                 self.move_cursor(result.end_location)
             return
+        # Stop the event: Paste bubbles and the Screen re-forwards it to the focused
+        # widget, so an unstopped paste is delivered again and the text is inserted twice.
+        event.stop()
+        event.prevent_default()
         await super()._on_paste(event)
 
     def _build_highlight_map(self) -> None:

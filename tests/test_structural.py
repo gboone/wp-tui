@@ -41,6 +41,47 @@ async def _focus_body(pilot, editor: TextBlockEditor) -> None:
 
 
 @pytest.mark.asyncio
+async def test_inserted_block_scrolls_into_view():
+    # Regression: inserting a block below the fold (Ctrl+N in the editor) must scroll it
+    # into view, not leave the caret in an off-screen block the user can't see typing in.
+    from wptui.api.dto import PostDetail, PostSummary
+    from wptui.app import WPTuiApp
+    from wptui.screens.editor import EditorScreen
+
+    doc = "\n\n".join(
+        f"<!-- wp:paragraph -->\n<p>Paragraph {i}.</p>\n<!-- /wp:paragraph -->" for i in range(20)
+    )
+
+    class Client:
+        async def get_post(self, pid, post_type="post"):
+            return PostDetail(pid, "T", doc, "draft", "2026-01-01T00:00:00", "http://x/1")
+
+        async def aclose(self):
+            pass
+
+    app = WPTuiApp()
+    app.client = Client()
+    async with app.run_test(size=(80, 24)) as pilot:
+        await pilot.pause()
+        app.push_screen(EditorScreen(PostSummary(1, "T", "draft", "2026-01-01T00:00:00", "http://x/1")))
+        await pilot.pause()
+        await pilot.pause()
+        canvas = app.screen.query_one(BlockCanvas)
+        list(canvas.query(TextBlockEditor))[-1].query_one("#body").focus()
+        await pilot.pause()
+        await pilot.press("ctrl+n")
+        for _ in range(6):
+            await pilot.pause()
+        new_editor = list(canvas.query(TextBlockEditor))[-1]
+        region = new_editor.region
+        viewport = canvas.content_region
+        assert region.height > 0
+        assert region.y >= viewport.y and region.y + region.height <= viewport.y + viewport.height, (
+            "the inserted block was not scrolled into view"
+        )
+
+
+@pytest.mark.asyncio
 async def test_renders_full_block_set():
     app = Harness(parse(DOC))
     async with app.run_test() as pilot:
@@ -118,7 +159,7 @@ async def test_insert_paragraph_via_keybinding():
     from wptui.screens.editor import EditorScreen
 
     class Client:
-        async def get_post(self, post_id):
+        async def get_post(self, post_id, post_type="post"):
             return PostDetail(post_id, "T", PARA, "draft", "2026-01-01T00:00:00", "http://x/1")
 
         async def aclose(self):

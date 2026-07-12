@@ -23,10 +23,10 @@ class RecordingClient:
         self._content = content
         self.saved_content: str | None = None
 
-    async def get_post(self, post_id):
+    async def get_post(self, post_id, post_type="post"):
         return PostDetail(post_id, "T", self._content, "draft", "2026-01-01T00:00:00", "http://x/1")
 
-    async def update_post(self, post_id, *, content_raw=None, title_raw=None, expected_modified_gmt=None):
+    async def update_post(self, post_id, *, content_raw=None, title_raw=None, settings=None, expected_modified_gmt=None):
         self.saved_content = content_raw
         return PostDetail(post_id, title_raw or "", content_raw or "", "draft", "2026-01-02T00:00:00", "http://x/1")
 
@@ -108,6 +108,41 @@ async def test_paste_non_url_over_selection_is_normal():
         # Selection replaced by the pasted text; no link syntax added.
         assert "[" not in area.text
         assert area.text.startswith("plain text")
+
+
+@pytest.mark.asyncio
+async def test_paste_not_duplicated_through_event_dispatch():
+    # Regression: Paste bubbles and the Screen re-forwards it to the focused widget, so a
+    # handler that doesn't stop the event inserts the pasted text twice. Post a REAL Paste
+    # (not a direct _on_paste call) so the dispatch-doubling is exercised.
+    app = Harness()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        area = app.query_one("#a", InlineMarkdownArea)
+        area.focus()
+        area.text = "[example link]()"
+        area.move_cursor((0, 15))  # between the parens, no selection
+        await pilot.pause()
+        area.post_message(events.Paste("https://example.com"))
+        await pilot.pause()
+        await pilot.pause()
+        assert area.text == "[example link](https://example.com)"
+
+
+@pytest.mark.asyncio
+async def test_plain_paste_not_duplicated_through_event_dispatch():
+    app = Harness()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        area = app.query_one("#a", InlineMarkdownArea)
+        area.focus()
+        area.text = ""
+        area.move_cursor((0, 0))
+        await pilot.pause()
+        area.post_message(events.Paste("hello"))
+        await pilot.pause()
+        await pilot.pause()
+        assert area.text == "hello"
 
 
 # ----------------------------------------------------------------------- vim

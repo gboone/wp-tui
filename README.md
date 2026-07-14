@@ -27,7 +27,7 @@ A Homebrew tap is planned:
 
 ```sh
 # once the tap is published
-brew install <owner>/tap/wptui
+brew install gboone/tap/wptui
 ```
 
 You'll be prompted for your site URL, username, and Application Password. The password is

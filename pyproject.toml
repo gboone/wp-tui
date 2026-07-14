@@ -36,6 +36,11 @@ dev = [
     "twine>=5.0",
 ]
 
+[project.urls]
+Homepage = "https://github.com/gboone/wp-tui"
+Repository = "https://github.com/gboone/wp-tui"
+Issues = "https://github.com/gboone/wp-tui/issues"
+
 [project.scripts]
 wptui = "wptui.__main__:main"
 

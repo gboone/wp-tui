@@ -6,6 +6,7 @@ import sys
 
 from wptui.app import WPTuiApp
 from wptui.blocks.markdown_import import convert_markdown
+from wptui.blocks.model import Block
 from wptui.stdin_import import (
     NoControllingTerminalError,
     read_piped_input,
@@ -18,7 +19,7 @@ def main() -> None:
     # constructed. Any failure in this step -- a read/decode error, or an unexpected
     # exception from markdown conversion -- is a hard failure (R16): report it clearly
     # and exit nonzero rather than let a raw traceback (or a half-built app) surface.
-    pending_import: tuple[str, list] | None = None
+    pending_import: tuple[str, list[Block]] | None = None
     try:
         piped = read_piped_input()
         if piped is not None:

@@ -172,6 +172,18 @@ class BlockCanvas(VerticalScroll):
         await self.recompose()
         self._restore_focus(focus)
 
+    def focus_first_block(self) -> None:
+        """Focus the first top-level block that has a focusable widget, if any.
+
+        Public entry point for callers outside the canvas (e.g. a screen deciding
+        where to land focus on mount) so they don't need to reach into the
+        underscore-prefixed focus machinery themselves.
+        """
+        for block in self.blocks:
+            if self._focus_widget_for(block) is not None:
+                self._restore_focus(block)
+                return
+
     def _restore_focus(self, target: Block | None) -> None:
         if target is None:
             return

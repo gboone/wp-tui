@@ -19,9 +19,18 @@ class NoControllingTerminalError(RuntimeError):
 
 
 def read_piped_input() -> str | None:
-    """Return the full piped stdin content, or ``None`` if stdin is a tty (nothing piped)."""
+    """Return the full piped stdin content, or ``None`` if stdin is a tty (nothing piped).
+
+    Reconfigures stdin to decode as UTF-8 first when possible: without it, a minimal or
+    scripted environment with no locale set (common for cron/CI/containers piping content
+    in) can default to ASCII and raise ``UnicodeDecodeError`` on ordinary non-ASCII
+    markdown (smart quotes, accented names, emoji). Falls back to whatever stdin already
+    is when it has no ``reconfigure`` (e.g. a test double).
+    """
     if sys.stdin.isatty():
         return None
+    if hasattr(sys.stdin, "reconfigure"):
+        sys.stdin.reconfigure(encoding="utf-8", errors="replace")
     return sys.stdin.read()
 
 
@@ -47,7 +56,15 @@ def reattach_controlling_terminal() -> None:
         ) from exc
 
     try:
-        os.dup2(tty_fd, 0)
-    finally:
-        if tty_fd != 0:
-            os.close(tty_fd)
+        try:
+            os.dup2(tty_fd, 0)
+        finally:
+            if tty_fd != 0:
+                os.close(tty_fd)
+    except OSError as exc:
+        # dup2/close failing (fd exhaustion, a sandboxed environment denying dup onto
+        # fd 0) is just as much a "can't reattach" failure as os.open failing above --
+        # it must not escape as a raw OSError past this function's documented contract.
+        raise NoControllingTerminalError(
+            "Failed to reattach input to the controlling terminal"
+        ) from exc

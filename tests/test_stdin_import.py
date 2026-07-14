@@ -103,6 +103,37 @@ def test_reattach_controlling_terminal_raises_dedicated_error_on_oserror(monkeyp
     assert isinstance(exc_info.value.__cause__, OSError)
 
 
+def test_reattach_controlling_terminal_raises_dedicated_error_on_dup2_failure(monkeypatch):
+    # dup2/close failing (fd exhaustion, a sandboxed environment denying dup onto fd 0)
+    # must be reported the same way os.open failing is -- not escape as a raw OSError.
+    # Only intercept the exact call our function makes (fd 42 -> target 0); anything
+    # else (e.g. pytest's own output-capture machinery) must fall through to the real
+    # os.dup2, or this test corrupts pytest's stdout/stderr capture teardown.
+    real_dup2 = os.dup2
+    real_close = os.close
+    monkeypatch.setattr(os, "ctermid", lambda: "/dev/tty", raising=False)
+    monkeypatch.setattr(os, "open", lambda path, flags: 42)
+
+    def fake_dup2(fd, target):
+        if fd == 42 and target == 0:
+            raise OSError(9, "Bad file descriptor")
+        return real_dup2(fd, target)
+
+    def fake_close(fd):
+        if fd == 42:
+            return None
+        return real_close(fd)
+
+    monkeypatch.setattr(os, "dup2", fake_dup2)
+    monkeypatch.setattr(os, "close", fake_close)
+
+    with pytest.raises(NoControllingTerminalError) as exc_info:
+        reattach_controlling_terminal()
+
+    assert exc_info.value.__cause__ is not None
+    assert isinstance(exc_info.value.__cause__, OSError)
+
+
 def test_reattach_controlling_terminal_raises_when_ctermid_missing(monkeypatch):
     # Simulates a platform (e.g. Windows) that has no os.ctermid() at all -- must raise
     # the same dedicated error type, not an unhandled AttributeError.

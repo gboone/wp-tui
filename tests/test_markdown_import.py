@@ -90,6 +90,16 @@ def test_inline_formatting_converts_through_existing_inline_converter():
     assert "<code>code</code>" in out
 
 
+def test_link_label_containing_escaped_bracket_survives_the_reassemble_round_trip():
+    # Reassembled link text is re-parsed by wptui.inline's hand-rolled parser, which
+    # needs every markup-significant character -- including ']' -- backslash-escaped
+    # or it misreads the label as ending early.
+    title, blocks = convert_markdown("See [a\\]b](https://example.com) link.")
+    (para,) = blocks
+    out = _serialize([para])
+    assert '<a href="https://example.com">a]b</a>' in out
+
+
 # ------------------------------------------------------------------------------ title
 
 
@@ -166,6 +176,24 @@ def test_image_alongside_text_is_dropped_with_no_stray_link():
     assert "isn't it nice?" in out
     assert "Look at this" in out
     assert para.block_name == "core/paragraph"
+
+
+def test_dropped_image_does_not_leave_a_stray_double_space():
+    title, blocks = convert_markdown(
+        "Look at this ![a cute cat](https://example.com/cat.png) photo."
+    )
+    (para,) = blocks
+    out = _serialize([para])
+    assert "this  photo" not in out
+    assert "this photo" in out
+
+
+def test_leading_dropped_image_does_not_leave_a_stray_leading_space():
+    title, blocks = convert_markdown("![alt](https://example.com/cat.png) leading text.")
+    (para,) = blocks
+    out = _serialize([para])
+    assert "<p> leading" not in out
+    assert "<p>leading text." in out
 
 
 def test_image_only_paragraph_converts_cleanly_with_no_broken_reference():

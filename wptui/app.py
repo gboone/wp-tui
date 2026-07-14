@@ -63,7 +63,7 @@ class WPTuiApp(App[None]):
             self.pending_import = None
             self.push_screen(
                 EditorScreen(post_type="post", import_blocks=blocks, import_title=title),
-                post_list._after_editor,
+                post_list.on_editor_closed,
             )
 
     async def action_quit(self) -> None:  # type: ignore[override]

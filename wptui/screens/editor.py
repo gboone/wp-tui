@@ -137,14 +137,8 @@ class EditorScreen(Screen[None]):
 
     def _focus_first_block(self) -> None:
         """Focus the first rendered block widget (used when a title is already filled in)."""
-        canvas = self._canvas
-        if canvas is None:
-            return
-        for block in canvas.blocks:
-            widget = canvas._focus_widget_for(block)
-            if widget is not None:
-                widget.focus()
-                return
+        if self._canvas is not None:
+            self._canvas.focus_first_block()
 
     @work(exclusive=True, group="editor-load")
     async def _load(self) -> None:

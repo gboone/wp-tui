@@ -29,6 +29,7 @@ tests and by the app-wiring unit that owns the piped-stdin flow.
 
 from __future__ import annotations
 
+import re
 from html import escape
 
 from markdown_it import MarkdownIt
@@ -38,11 +39,7 @@ from wptui.blocks.factory import BLOCK_SEPARATOR
 from wptui.blocks.grammar import parse
 from wptui.blocks.model import Block
 from wptui.inline import document_to_html, markdown_to_document
-
-# Characters wptui.inline's hand-rolled markdown parser treats as markup and must be
-# backslash-escaped in plain text reassembled from markdown-it's inline tree, mirroring
-# wptui.inline.markup._ESCAPABLE.
-_ESCAPABLE = set("\\`*[")
+from wptui.inline.markup import _ESCAPABLE, _escape_md as _escape_plain, _fence_code
 
 _md = MarkdownIt("commonmark")
 
@@ -222,7 +219,14 @@ def _reassemble(children: list[SyntaxTreeNode]) -> str:
     them would have wptui.inline's parser read ``!`` as literal text followed by an
     ordinary ``[alt](url)`` link, producing a stray clickable link.
     """
-    return "".join(_render_inline_node(child) for child in children)
+    had_image = any(child.type == "image" for child in children)
+    text = "".join(_render_inline_node(child) for child in children)
+    if had_image:
+        # A dropped image leaves no placeholder, so whitespace that used to flank it
+        # collapses into a run (or, at an edge, a stray leading/trailing space) --
+        # clean that artifact up without touching genuine content.
+        text = re.sub(r" {2,}", " ", text).strip()
+    return text
 
 
 def _render_inline_node(node: SyntaxTreeNode) -> str:
@@ -260,26 +264,3 @@ def _render_emphasis(node: SyntaxTreeNode) -> str:
     return f"{wrapper}{inner}{wrapper}"
 
 
-def _escape_plain(text: str) -> str:
-    out: list[str] = []
-    for ch in text:
-        if ch in _ESCAPABLE:
-            out.append("\\")
-        out.append(ch)
-    return "".join(out)
-
-
-def _fence_code(text: str) -> str:
-    """Wrap ``text`` in a backtick fence long enough to contain any backticks inside.
-
-    Mirrors ``wptui.inline.markup._fence_code``'s logic so reassembled code spans
-    re-parse to the same content through wptui.inline's hand-rolled parser.
-    """
-    longest = current = 0
-    for ch in text:
-        current = current + 1 if ch == "`" else 0
-        longest = max(longest, current)
-    fence = "`" * (longest + 1)
-    if text and (text[0] == "`" or text[-1] == "`"):
-        return f"{fence} {text} {fence}"
-    return f"{fence}{text}{fence}"

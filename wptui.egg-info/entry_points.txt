@@ -1,2 +1,0 @@
-[console_scripts]
-wptui = wptui.__main__:main

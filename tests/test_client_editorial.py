@@ -50,7 +50,8 @@ async def test_create_post_targets_posts_and_returns_detail():
     client = _client(handler)
     detail = await client.create_post("post", title_raw="Hi", content_raw="<p>c</p>")
     assert seen["method"] == "POST"
-    assert seen["url"].endswith("/wp/v2/posts?context=edit&_fields=" ) or "/wp/v2/posts" in seen["url"]
+    # Collection route (the "?" rules out /posts/{id}) with the edit context.
+    assert "/wp/v2/posts?" in seen["url"] and "context=edit" in seen["url"]
     assert detail.id == 42
     await client.aclose()
 
@@ -93,6 +94,38 @@ async def test_update_post_merges_settings_and_content():
     assert body["status"] == "publish" and body["slug"] == "my-slug"
     assert body["categories"] == [1, 2] and body["tags"] == [5]
     assert "/wp/v2/posts/7" in captured["url"]
+
+
+async def test_get_existing_page_targets_pages_route():
+    seen = {}
+
+    def handler(req):
+        seen["url"] = str(req.url)
+        return httpx.Response(200, json={**POST_JSON, "id": 8, "type": "page"})
+
+    client = _client(handler)
+    detail = await client.get_post(8, "page")
+    assert "/wp/v2/pages/8" in seen["url"] and detail.post_type == "page"
+    await client.aclose()
+
+
+async def test_update_existing_page_targets_pages_route():
+    seen = {}
+
+    def handler(req):
+        seen["url"] = str(req.url)
+        seen["body"] = _body(req)
+        return httpx.Response(200, json={**POST_JSON, "id": 8, "type": "page"})
+
+    settings = PostSettings(post_type="page", parent=2, menu_order=4, template="wide.php")
+    client = _client(handler)
+    # expected_modified_gmt=None -> no conflict pre-check GET; the single request is the update.
+    await client.update_post(8, content_raw="<p>x</p>", title_raw="About", settings=settings)
+    assert "/wp/v2/pages/8" in seen["url"]
+    body = seen["body"]
+    assert body["parent"] == 2 and body["template"] == "wide.php"
+    assert "categories" not in body and "tags" not in body  # page payload, not post
+    await client.aclose()
     await client.aclose()
 
 

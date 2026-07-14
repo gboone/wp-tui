@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 from textual.widgets import Input
 
@@ -220,3 +222,96 @@ async def test_lost_create_untitled_prompts_before_creating():
         await pilot.pause()
         await pilot.pause()
         assert client.create_calls == 2  # created after confirmation
+
+
+# --- editing an existing page saves as a page (routing carried through editor) ---
+
+
+@pytest.mark.asyncio
+async def test_editing_existing_page_saves_as_page():
+    from wptui.app import WPTuiApp
+    from wptui.screens.editor import EditorScreen
+
+    client = RecordingClient()
+    app = WPTuiApp()
+    app.client = client
+    summary = PostSummary(42, "About", "draft", "2026-01-01T00:00:00", "http://x/42", "page")
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app.push_screen(EditorScreen(summary))
+        await pilot.pause()
+        await pilot.pause()
+        await pilot.press("ctrl+s")
+        await pilot.pause()
+        await pilot.pause()
+        assert len(client.updated) == 1 and client.updated[0][0] == 42
+        settings = client.updated[0][3]
+        assert isinstance(settings, PostSettings) and settings.post_type == "page"
+
+
+# --- #1: popping the editor mid-request must not crash the app ----------------
+
+
+class _GatedClient(RecordingClient):
+    """get_post/create_post block on an event so the test can pop the screen mid-request."""
+
+    def __init__(self, gate: asyncio.Event) -> None:
+        super().__init__()
+        self._gate = gate
+
+    async def get_post(self, pid, post_type="post"):
+        await self._gate.wait()
+        return await super().get_post(pid, post_type)
+
+    async def create_post(self, post_type, *, title_raw="", content_raw="", settings=None):
+        await self._gate.wait()
+        return await super().create_post(
+            post_type, title_raw=title_raw, content_raw=content_raw, settings=settings
+        )
+
+
+@pytest.mark.asyncio
+async def test_pop_editor_during_load_does_not_crash():
+    from wptui.app import WPTuiApp
+    from wptui.screens.connect import ConnectScreen
+    from wptui.screens.editor import EditorScreen
+
+    gate = asyncio.Event()
+    app = WPTuiApp()
+    app.client = _GatedClient(gate)
+    summary = PostSummary(1, "T", "draft", "2026-01-01T00:00:00", "http://x/1", "post")
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app.push_screen(EditorScreen(summary))
+        await pilot.pause()  # _load starts and blocks on the gate
+        app.pop_screen()  # leave the editor while the fetch is in flight
+        await pilot.pause()
+        gate.set()  # release the (now cancelled) request
+        await pilot.pause()
+        await pilot.pause()
+        # Back on the connect screen, app still alive — no crash from a detached-DOM touch.
+        assert isinstance(app.screen, ConnectScreen)
+
+
+@pytest.mark.asyncio
+async def test_pop_editor_during_save_does_not_crash():
+    from wptui.app import WPTuiApp
+    from wptui.screens.connect import ConnectScreen
+    from wptui.screens.editor import EditorScreen
+
+    gate = asyncio.Event()
+    app = WPTuiApp()
+    app.client = _GatedClient(gate)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        editor = await _new_editor(pilot, app)
+        editor.query_one("#editor-title", Input).value = "In flight"
+        await pilot.pause()
+        await pilot.press("ctrl+s")  # create starts and blocks on the gate
+        await pilot.pause()
+        app.pop_screen()  # leave the editor mid-save
+        await pilot.pause()
+        gate.set()
+        await pilot.pause()
+        await pilot.pause()
+        assert isinstance(app.screen, ConnectScreen)

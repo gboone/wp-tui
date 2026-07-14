@@ -242,6 +242,44 @@ async def test_term_picker_reuses_existing_shown_term():
     assert result["ids"] == [1]  # the existing term is selected
 
 
+@pytest.mark.asyncio
+async def test_term_picker_preserves_off_page_selection():
+    """A term selected before a search narrows it off-screen must survive closing the picker."""
+    from textual.widgets import Input as TInput
+    from textual.widgets import SelectionList
+
+    from wptui.widgets.term_picker import TermPicker
+
+    class App2(App):
+        def compose(self):
+            yield from ()
+
+    app = App2()
+    app.client = TermClient()
+    result: dict = {}
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        # "News" (id 1) starts selected.
+        app.push_screen(TermPicker("categories", [1]), lambda ids: result.update(ids=ids))
+        await pilot.pause()
+        await pilot.pause()
+        # Search "Rev" so only "Reviews" (id 2) is shown and "News" (id 1) is off-page.
+        search = app.screen.query_one("#term-search", TInput)
+        search.focus()
+        search.value = "Rev"
+        await pilot.press("enter")
+        await pilot.pause()
+        await pilot.pause()
+        sl = app.screen.query_one("#term-list", SelectionList)
+        assert sl.option_count == 1  # only Reviews remains listed
+        sl.select(2)  # select the shown term
+        await pilot.pause()
+        await pilot.press("escape")
+        await pilot.pause()
+    # Off-page "News" (1) is preserved alongside the newly selected "Reviews" (2).
+    assert result["ids"] == [1, 2]
+
+
 class MediaClient:
     async def list_media(self, search=None, *, per_page=30):
         from wptui.api import MediaItem

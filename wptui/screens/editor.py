@@ -22,7 +22,7 @@ from wptui.api import (
     PostSummary,
 )
 from wptui.autosave import clear_snapshot, list_snapshots, read_snapshot, write_snapshot
-from wptui.blocks import parse, serialize
+from wptui.blocks import Block, parse, serialize
 from wptui.widgets.canvas import BlockCanvas
 
 # How often the editor snapshots the in-progress buffer to disk (crash safety).
@@ -32,9 +32,13 @@ _AUTOSAVE_INTERVAL = 2.0
 class EditorScreen(Screen[None]):
     """Edit one post/page's title, block content, and settings.
 
-    Two modes: pass a ``summary`` to open an existing post, or pass ``post_type`` (with no
-    summary) to create a new one. A new post issues no write until the first save (no
-    orphan drafts) and skips the conflict pre-check.
+    Three modes: pass a ``summary`` to open an existing post; pass ``post_type`` (with no
+    summary) to create a blank new one; or pass ``import_blocks``/``import_title`` (with no
+    summary) to open a new post pre-filled with already-built content (e.g. piped-in
+    markdown). All new-post modes issue no write until the first save (no orphan drafts)
+    and skip the conflict pre-check; the pre-filled mode additionally skips the "resume an
+    unsaved draft?" prompt, since the imported content is itself the just-arrived unsaved
+    state.
     """
 
     BINDINGS = [
@@ -48,11 +52,22 @@ class EditorScreen(Screen[None]):
         ("escape", "app.pop_screen", "Back"),
     ]
 
-    def __init__(self, summary: PostSummary | None = None, *, post_type: str = "post") -> None:
+    def __init__(
+        self,
+        summary: PostSummary | None = None,
+        *,
+        post_type: str = "post",
+        import_blocks: list[Block] | None = None,
+        import_title: str | None = None,
+    ) -> None:
         super().__init__()
         self._summary = summary
         self._post_id: int | None = summary.id if summary is not None else None
         self._post_type = summary.post_type if summary is not None else post_type
+        # Pre-built content (e.g. converted from piped markdown) to open with instead of
+        # starting blank or fetching from the server. ``None`` unless the caller passed it.
+        self._import_blocks = import_blocks
+        self._import_title = import_title
         self._modified_gmt: str | None = None
         self._settings = PostSettings(post_type=self._post_type)
         self._canvas: BlockCanvas | None = None
@@ -77,6 +92,8 @@ class EditorScreen(Screen[None]):
         self._draft_key = self._draft_key_for(self._post_id)
         if self._summary is not None:
             self._load()
+        elif self._import_blocks is not None:
+            self.call_later(self._start_import)
         else:
             self.call_later(self._start_blank)
         # Snapshot the buffer on a timer so a crash/quit never loses unsaved work.
@@ -91,6 +108,43 @@ class EditorScreen(Screen[None]):
         self.query_one("#editor-title", Input).focus()
         self._set_status(f"New {self._post_type} · Ctrl+E settings · Ctrl+S to save")
         self._maybe_offer_resume_new()
+
+    async def _start_import(self) -> None:
+        """Set up a new post pre-filled with already-converted content (no fetch).
+
+        No WordPress write happens here — this behaves exactly like ``_start_blank``
+        content-wise, just pre-populated — and unlike a blank new post, it deliberately
+        skips ``_maybe_offer_resume_new``: the imported content is itself the just-arrived
+        unsaved state, and offering an unrelated stale draft here risks discarding the
+        import if the user declines it.
+        """
+        blocks = self._import_blocks or []
+        title = self._import_title or ""
+        self.query_one("#editor-title", Input).value = title
+        canvas = BlockCanvas(blocks)
+        self._canvas = canvas
+        await self.query_one("#editor-body", Static).remove()
+        await self.mount(canvas, before=self.query_one("#editor-status"))
+        self._set_status(f"Imported {len(blocks)} block(s) · Ctrl+E settings · Ctrl+S to save")
+        if title:
+            self._focus_first_block()
+        else:
+            self.query_one("#editor-title", Input).focus()
+        # Piped content arrives instantly and fully formed, so the usual "typing takes
+        # longer than the first tick" assumption doesn't hold: snapshot right away rather
+        # than risk losing it to a quit within the first autosave interval.
+        self._autosave_tick()
+
+    def _focus_first_block(self) -> None:
+        """Focus the first rendered block widget (used when a title is already filled in)."""
+        canvas = self._canvas
+        if canvas is None:
+            return
+        for block in canvas.blocks:
+            widget = canvas._focus_widget_for(block)
+            if widget is not None:
+                widget.focus()
+                return
 
     @work(exclusive=True, group="editor-load")
     async def _load(self) -> None:

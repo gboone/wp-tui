@@ -11,6 +11,9 @@ dependencies = [
     "httpx>=0.27",
     "keyring>=25.0",
     "platformdirs>=4.0",
+    # Already an existing transitive dependency of textual; declared directly since
+    # wptui.blocks.markdown_import now imports it itself.
+    "markdown-it-py>=3.0",
 ]
 
 [project.optional-dependencies]

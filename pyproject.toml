@@ -4,6 +4,19 @@ version = "0.1.0"
 description = "A terminal UI for editing WordPress posts"
 readme = "README.md"
 requires-python = ">=3.12"
+license = "GPL-3.0-or-later"
+license-files = ["LICENSE"]
+authors = [{ name = "Greg Boone" }]
+keywords = ["wordpress", "tui", "terminal", "textual", "cli", "editor"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: End Users/Desktop",
+    "Programming Language :: Python :: 3.12",
+    "Operating System :: MacOS",
+    "Operating System :: POSIX :: Linux",
+    "Topic :: Internet :: WWW/HTTP :: Site Management",
+]
 dependencies = [
     # Capped: InlineMarkdownArea overrides TextArea internals (_build_highlight_map,
     # _highlights, _line_cache, _replace_via_keyboard) that can change across majors.
@@ -19,13 +32,15 @@ dev = [
     "pytest-asyncio>=0.24",
     "textual-dev>=1.7",
     "hypothesis>=6.0",
+    "build>=1.0",
+    "twine>=5.0",
 ]
 
 [project.scripts]
 wptui = "wptui.__main__:main"
 
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]

@@ -81,6 +81,8 @@ class TermPicker(ModalScreen[list[int]]):
         if not name:
             return
         client = self.app.client  # type: ignore[attr-defined]
+        if client is None:  # match the guard every sibling worker uses
+            return
         try:
             term = await client.create_term(self._taxonomy, name)
         except ApiError as err:
@@ -90,10 +92,16 @@ class TermPicker(ModalScreen[list[int]]):
         if not self.is_mounted:
             return
         sl = self.query_one("#term-list", SelectionList)
-        sl.add_option((term.name, term.id, True))
-        self._shown.add(term.id)
+        # create_term may resolve to an already-existing term (a duplicate/case variant), which
+        # can already be on screen — select that row instead of adding a duplicate option.
+        if term.id in self._shown:
+            sl.select(term.id)
+        else:
+            sl.add_option((term.name, term.id, True))
+            self._shown.add(term.id)
         self._selected.add(term.id)
         self.query_one("#term-new", Input).value = ""
+        self.query_one("#term-status", Static).update(f"Added {term.name}")
 
     def action_done(self) -> None:
         self.dismiss(sorted(self._selected))

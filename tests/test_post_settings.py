@@ -198,6 +198,50 @@ async def test_term_picker_creates_new_term():
     assert 99 in result["ids"]  # newly created term is selected
 
 
+@pytest.mark.asyncio
+async def test_term_picker_reuses_existing_shown_term():
+    """An inline 'add' that the client resolves to an already-listed term selects that row
+    instead of adding a duplicate option (the term_exists reuse path)."""
+    from textual.widgets import SelectionList
+
+    from wptui.widgets.term_picker import TermPicker
+
+    class ReuseClient(TermClient):
+        async def create_term(self, taxonomy, name):
+            from wptui.api import Term
+
+            # Mirror the real client resolving a duplicate name to the existing term id 1 ("News").
+            self.created.append((taxonomy, name))
+            return Term(1, "News", "category")
+
+    class App2(App):
+        def compose(self):
+            yield from ()
+
+    app = App2()
+    app.client = ReuseClient()
+    result: dict = {}
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app.push_screen(TermPicker("categories", []), lambda ids: result.update(ids=ids))
+        await pilot.pause()
+        await pilot.pause()
+        from textual.widgets import Button as TButton
+        from textual.widgets import Input as TInput
+
+        sl = app.screen.query_one("#term-list", SelectionList)
+        before = sl.option_count  # News/Reviews/Life already listed
+        app.screen.query_one("#term-new", TInput).value = "news"
+        await pilot.pause()
+        app.screen.query_one("#term-add", TButton).press()
+        await pilot.pause()
+        await pilot.pause()
+        assert sl.option_count == before  # no duplicate row added
+        await pilot.press("escape")
+        await pilot.pause()
+    assert result["ids"] == [1]  # the existing term is selected
+
+
 class MediaClient:
     async def list_media(self, search=None, *, per_page=30):
         from wptui.api import MediaItem

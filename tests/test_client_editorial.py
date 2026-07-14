@@ -268,16 +268,64 @@ async def test_list_media_non_list_raises():
     await client.aclose()
 
 
-async def test_create_term_posts_name_and_returns_term():
+async def test_create_term_lowercases_name_and_returns_term():
     captured = {}
 
     def handler(req):
         captured["url"] = str(req.url)
         captured["body"] = _body(req)
-        return httpx.Response(201, json={"id": 99, "name": "Fresh", "taxonomy": "post_tag"})
+        return httpx.Response(201, json={"id": 99, "name": "fresh", "taxonomy": "post_tag"})
 
     client = _client(handler)
-    term = await client.create_term("tags", "Fresh")
-    assert "/wp/v2/tags" in captured["url"] and captured["body"] == {"name": "Fresh"}
-    assert term.id == 99 and term.name == "Fresh"
+    term = await client.create_term("tags", "  Fresh  ")
+    # The name is stripped + lowercased before it is sent, so casing-only variants collapse.
+    assert "/wp/v2/tags" in captured["url"] and captured["body"] == {"name": "fresh"}
+    assert term.id == 99 and term.name == "fresh"
+    await client.aclose()
+
+
+async def test_create_term_reuses_existing_on_term_exists():
+    calls = []
+
+    def handler(req):
+        calls.append((req.method, str(req.url)))
+        if req.method == "POST":
+            # WordPress rejects a duplicate slug with 400 term_exists + the existing id.
+            return httpx.Response(
+                400,
+                json={"code": "term_exists", "message": "exists",
+                      "data": {"status": 400, "term_id": 42}},
+            )
+        return httpx.Response(200, json={"id": 42, "name": "apple", "taxonomy": "post_tag"})
+
+    client = _client(handler)
+    term = await client.create_term("tags", "Apple")  # different case than the stored "apple"
+    assert term.id == 42 and term.name == "apple"
+    # A duplicate name POSTs first, then resolves the existing term with a follow-up GET.
+    assert calls[0][0] == "POST" and "/wp/v2/tags" in calls[0][1]
+    assert calls[1][0] == "GET" and "/wp/v2/tags/42" in calls[1][1]
+    await client.aclose()
+
+
+async def test_create_term_handles_string_term_id():
+    def handler(req):
+        if req.method == "POST":
+            return httpx.Response(
+                400, json={"code": "term_exists", "data": {"term_id": "7"}}
+            )
+        return httpx.Response(200, json={"id": 7, "name": "news", "taxonomy": "category"})
+
+    client = _client(handler)
+    term = await client.create_term("categories", "News")
+    assert term.id == 7
+    await client.aclose()
+
+
+async def test_create_term_non_term_exists_400_still_raises():
+    def handler(req):
+        return httpx.Response(400, json={"code": "rest_invalid_param", "message": "bad"})
+
+    client = _client(handler)
+    with pytest.raises(ApiError):
+        await client.create_term("tags", "x")
     await client.aclose()

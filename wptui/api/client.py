@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import mimetypes
+from collections.abc import Callable
 from pathlib import Path
 from types import TracebackType
 from typing import Any
@@ -95,11 +96,18 @@ class WordPressClient:
 
     # -- requests -----------------------------------------------------------
 
-    async def _request(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
+    async def _send(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
+        """Send a request, mapping transport failures to :class:`NetworkError` but NOT
+        raising for an HTTP error status — the caller inspects the response itself. Used by
+        :meth:`create_term` to read a ``term_exists`` 400 that carries the existing term id.
+        """
         try:
-            response = await self._client.request(method, path, **kwargs)
+            return await self._client.request(method, path, **kwargs)
         except httpx.HTTPError as err:  # connect/timeout/TLS/etc.
             raise NetworkError(str(err)) from err
+
+    async def _request(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
+        response = await self._send(method, path, **kwargs)
         _raise_for_status(response)
         return response
 
@@ -150,10 +158,7 @@ class WordPressClient:
         if search:
             params["search"] = search
         response = await self._request("GET", "/posts", params=params)
-        data = self._json(response)
-        if not isinstance(data, list):
-            raise NetworkError("Expected a list of posts from the server.")
-        return [PostSummary.from_json(item) for item in data if isinstance(item, dict)]
+        return _parse_list(self._json(response), PostSummary.from_json, "posts")
 
     async def get_post(self, post_id: int, post_type: str = "post") -> PostDetail:
         """Fetch one post/page with raw, editable content + settings (``context=edit``)."""
@@ -277,10 +282,7 @@ class WordPressClient:
         if search:
             params["search"] = search
         response = await self._request("GET", "/media", params=params)
-        data = self._json(response)
-        if not isinstance(data, list):
-            raise NetworkError("Expected a list of media items from the server.")
-        return [MediaItem.from_json(m) for m in data if isinstance(m, dict)]
+        return _parse_list(self._json(response), MediaItem.from_json, "media items")
 
     # -- taxonomy terms -----------------------------------------------------
 
@@ -298,19 +300,53 @@ class WordPressClient:
         if search:
             params["search"] = search
         response = await self._request("GET", f"/{taxonomy}", params=params)
-        data = self._json(response)
-        if not isinstance(data, list):
-            raise NetworkError("Expected a list of terms from the server.")
-        return [Term.from_json(t) for t in data if isinstance(t, dict)]
+        return _parse_list(self._json(response), Term.from_json, "terms")
 
     async def create_term(self, taxonomy: str, name: str) -> Term:
-        """Create a new term in a taxonomy and return it."""
+        """Create a term, or return the existing one when the name already exists.
+
+        The name is lowercased first so casing-only variants ("Apple" vs "apple") collapse to
+        a single term. WordPress enforces term uniqueness by slug, so a duplicate name comes
+        back as HTTP 400 ``term_exists`` carrying the existing ``term_id``; we resolve and
+        return that term instead of raising, so an inline "add" of a name that already exists
+        lands on the term the user meant rather than dead-ending on an error.
+        """
+        name = name.strip().lower()
         params = {"context": "edit", "_fields": "id,name,taxonomy"}
-        response = await self._request("POST", f"/{taxonomy}", params=params, json={"name": name})
+        response = await self._send(
+            "POST", f"/{taxonomy}", params=params, json={"name": name}
+        )
+        if response.status_code == 400:
+            term_id = _term_exists_id(response)
+            if term_id is not None:
+                return await self._get_term(taxonomy, term_id)
+        _raise_for_status(response)
         data = self._json(response)
         if not isinstance(data, dict) or "id" not in data:
             raise NetworkError("Unexpected response creating a term.")
         return Term.from_json(data)
+
+    async def _get_term(self, taxonomy: str, term_id: int) -> Term:
+        """Fetch one term by id (resolves a ``term_exists`` collision to a real Term)."""
+        params = {"context": "edit", "_fields": "id,name,taxonomy"}
+        response = await self._request("GET", f"/{taxonomy}/{term_id}", params=params)
+        data = self._json(response)
+        if not isinstance(data, dict) or "id" not in data:
+            raise NetworkError("Unexpected response fetching a term.")
+        return Term.from_json(data)
+
+
+def _parse_list(
+    data: Any, from_json: Callable[[dict[str, Any]], Any], label: str
+) -> list[Any]:
+    """Coerce a JSON list body into DTOs, rejecting a non-list shape as a NetworkError.
+
+    Shared by ``list_posts``/``list_media``/``list_terms`` so the list-shape guard and the
+    skip-non-dict-entries rule stay identical across all three collection reads.
+    """
+    if not isinstance(data, list):
+        raise NetworkError(f"Expected a list of {label} from the server.")
+    return [from_json(item) for item in data if isinstance(item, dict)]
 
 
 def _post_detail(data: Any) -> PostDetail:
@@ -325,6 +361,32 @@ def _media_item(data: Any) -> MediaItem:
     if not isinstance(data, dict) or "id" not in data:
         raise NetworkError("Unexpected response shape for a media item.")
     return MediaItem.from_json(data)
+
+
+def _term_exists_id(response: httpx.Response) -> int | None:
+    """Return the existing term id from a WordPress ``term_exists`` 400 body, else None.
+
+    A duplicate-name POST returns ``{"code": "term_exists", "data": {"term_id": N}}``. WP has
+    historically typed ``term_id`` as either an int or a numeric string, so accept both; a
+    bool (an int subclass) is rejected so a stray ``true`` can't masquerade as id 1.
+    """
+    try:
+        body = response.json()
+    except ValueError:
+        return None
+    if not isinstance(body, dict) or body.get("code") != "term_exists":
+        return None
+    data = body.get("data")
+    if not isinstance(data, dict):
+        return None
+    term_id = data.get("term_id")
+    if isinstance(term_id, bool):
+        return None
+    if isinstance(term_id, int):
+        return term_id
+    if isinstance(term_id, str) and term_id.isdigit():
+        return int(term_id)
+    return None
 
 
 def _raise_for_status(response: httpx.Response) -> None:

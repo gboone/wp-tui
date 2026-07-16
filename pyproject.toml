@@ -1,6 +1,6 @@
 [project]
 name = "wptui"
-version = "0.1.0"
+version = "0.1.1"
 description = "A terminal UI for editing WordPress posts"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -50,6 +50,11 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 include = ["wptui*"]
+
+[tool.setuptools.package-data]
+# app.tcss is loaded at runtime via App.CSS_PATH; without this it is left out of
+# the wheel (setuptools packages only .py by default) and `wptui` crashes on launch.
+wptui = ["*.tcss"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

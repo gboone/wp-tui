@@ -128,6 +128,21 @@ class BlockCanvas(VerticalScroll):
         """Insert a new empty paragraph after the focused top-level block."""
         return await self.insert_block(new_paragraph_block())
 
+    async def replace_focused(self, new_block: Block) -> bool:
+        """Replace the focused top-level block with ``new_block`` at the same position.
+
+        Used by the slash-command block switcher to convert an empty block to another
+        type. No separator is added — this is a positional swap, not an insertion.
+        """
+        block = self._focused_owner()
+        if block is None:
+            return False
+        self.sync()
+        index = self.blocks.index(block)
+        self.blocks[index] = new_block
+        await self._rerender(focus=new_block)
+        return True
+
     async def insert_block(self, new_block: Block) -> bool:
         """Insert an arbitrary new top-level block after the focused one (or at the end)."""
         block = self._focused_owner()
@@ -186,6 +201,12 @@ class BlockCanvas(VerticalScroll):
 
     def _focus_widget_for(self, target: Block) -> Widget | None:
         """The widget that should receive focus for a top-level block (inner field first)."""
+        # For a container (list/quote), focus its first rendered child editor so the user
+        # can type the first item/line immediately, not the container's label.
+        if target.block_name in _CONTAINERS and target.inner_blocks:
+            for widget, owner in self._owner.items():
+                if owner is target and isinstance(widget, TextBlockEditor):
+                    return widget.query_one("#body")
         for widget, owner in self._owner.items():
             if isinstance(widget, TextBlockEditor) and widget.block is target:
                 return widget.query_one("#body")

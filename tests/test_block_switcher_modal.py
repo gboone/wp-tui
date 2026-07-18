@@ -67,7 +67,7 @@ async def test_selecting_an_option_dismisses_with_it():
         await pilot.pause()
         options = app.screen.query_one("#switch-list", OptionList)
         options.focus()
-        options.highlighted = 2  # Bulleted list, in registry order
+        options.highlighted = [bt.label for bt in REGISTRY].index("Bulleted list")
         await pilot.press("enter")
         await pilot.pause()
     assert app.result.label == "Bulleted list"

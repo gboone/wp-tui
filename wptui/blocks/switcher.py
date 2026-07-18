@@ -32,10 +32,20 @@ class BlockType:
     factory: Callable[[], Block]
 
 
+# One switchable entry per heading level. The default arg pins ``n`` per lambda.
+_HEADINGS: tuple[BlockType, ...] = tuple(
+    BlockType(
+        f"Heading {n}",
+        frozenset({f"heading {n}", f"h{n}", "heading", "header", "title"}),
+        lambda n=n: new_heading_block(n),
+    )
+    for n in range(1, 7)
+)
+
 # Registry order is the display order in the picker.
 REGISTRY: tuple[BlockType, ...] = (
     BlockType("Paragraph", frozenset({"paragraph", "text", "p"}), new_paragraph_block),
-    BlockType("Heading", frozenset({"heading", "header", "title", "h2"}), lambda: new_heading_block(2)),
+    *_HEADINGS,
     BlockType(
         "Bulleted list",
         frozenset({"bulleted list", "bullet list", "unordered list", "bullets", "ul"}),

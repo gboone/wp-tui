@@ -19,11 +19,13 @@ LIST = (
     "<!-- wp:list-item --><li>two</li><!-- /wp:list-item -->"
     "</ul>\n<!-- /wp:list -->"
 )
-TABLE = (
-    "<!-- wp:table -->\n<figure><table><tbody><tr><td>keep</td></tr>"
-    "</tbody></table></figure>\n<!-- /wp:table -->"
+# A still-opaque block (tables are now editable). Spacer stands in as the passthrough case.
+OPAQUE = (
+    '<!-- wp:spacer {"height":"40px"} -->\n'
+    '<div style="height:40px" aria-hidden="true" class="wp-block-spacer"></div>\n'
+    "<!-- /wp:spacer -->"
 )
-DOC = "\n\n".join([PARA, SEP, LIST, TABLE])
+DOC = "\n\n".join([PARA, SEP, LIST, OPAQUE])
 
 
 class Harness(App):
@@ -90,7 +92,7 @@ async def test_renders_full_block_set():
         # paragraph + two list-items = 3 inline editors
         assert len(list(canvas.query(TextBlockEditor))) == 3
         assert len(list(canvas.query(SeparatorCard))) == 1
-        assert len(list(canvas.query(OpaqueCard))) == 1  # the table
+        assert len(list(canvas.query(OpaqueCard))) == 1  # the spacer
         # Clean round-trip when nothing was touched.
         assert serialize(canvas.blocks) == DOC
 
@@ -112,7 +114,7 @@ async def test_move_block_down_reorders_top_level():
         assert canvas.blocks[2].block_name == "core/paragraph"
         out = serialize(canvas.blocks)
         assert out.startswith(SEP)
-        assert PARA in out and LIST in out and TABLE in out
+        assert PARA in out and LIST in out and OPAQUE in out
 
 
 @pytest.mark.asyncio
@@ -121,15 +123,15 @@ async def test_delete_focused_block_removes_it():
     async with app.run_test() as pilot:
         await pilot.pause()
         canvas = app.query_one(BlockCanvas)
-        table_card = app.query_one(OpaqueCard)
-        table_card.focus()
+        opaque_card = app.query_one(OpaqueCard)
+        opaque_card.focus()
         await pilot.pause()
 
         assert await canvas.delete_focused() is True
         names = [b.block_name for b in canvas.blocks]
-        assert "core/table" not in names
+        assert "core/spacer" not in names
         assert "core/list" in names  # siblings survive
-        assert serialize(canvas.blocks).count("wp:table") == 0
+        assert serialize(canvas.blocks).count("wp:spacer") == 0
 
 
 @pytest.mark.asyncio

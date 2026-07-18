@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import re
 from html import escape
 from typing import TYPE_CHECKING
 
 from wptui.blocks.model import Block
-from wptui.blocks.text import get_editable_body, split_wrapper
+from wptui.blocks.text import split_wrapper
 
 if TYPE_CHECKING:  # avoid a runtime dependency; factory stays in the headless layer
     from wptui.api.dto import MediaItem
@@ -43,26 +44,26 @@ def new_heading_block(level: int = 2) -> Block:
 def set_heading_level(block: Block, level: int) -> None:
     """Change a ``core/heading`` block's level in place, preserving its body.
 
-    Swaps only the wrapper tag name (keeping any other wrapper attributes — an anchor id,
-    alignment class — intact) and updates the ``level`` attribute to match WordPress
-    (``level`` omitted for the default H2, present otherwise). Clears ``attributes_raw`` so
-    the changed attributes re-encode, and marks the block dirty. Falls back to a fresh
-    wrapper if the inner HTML isn't a recognizable single wrapper."""
-    old = block.attributes.get("level", 2)
+    Swaps only the wrapper tag name — whatever ``<h1..6>`` is actually there, so a heading
+    whose attribute and tag disagree is corrected rather than left inconsistent — and keeps
+    any other wrapper attributes (an anchor id, alignment class) intact. Updates the
+    ``level`` attribute to match WordPress (``level`` omitted for the default H2).
+
+    No-op when the block already sits at ``level`` (preserving its exact bytes) or when its
+    inner HTML isn't a recognizable single wrapper (nothing safe to swap)."""
     wrapped = split_wrapper(block.inner_html)
-    if wrapped is None:
-        inner = f'\n<h{level} class="wp-block-heading">{get_editable_body(block) or ""}</h{level}>\n'
-    else:
-        prefix = wrapped.prefix.replace(f"<h{old}", f"<h{level}", 1)
-        suffix = wrapped.suffix.replace(f"</h{old}>", f"</h{level}>", 1)
-        inner = f"{prefix}{wrapped.body}{suffix}"
+    if wrapped is None or block.attributes.get("level", 2) == level:
+        return
+    prefix = re.sub(r"<h[1-6]", f"<h{level}", wrapped.prefix, count=1)
+    suffix = re.sub(r"</h[1-6]>", f"</h{level}>", wrapped.suffix, count=1)
+    inner = f"{prefix}{wrapped.body}{suffix}"
     block.inner_html = inner
     block.inner_content = [inner]
     if level == 2:
         block.attributes.pop("level", None)
     else:
         block.attributes["level"] = level
-    block.attributes_raw = None
+    block.attributes_raw = None  # level changed — re-encode (WP re-normalizes on save)
     block.mark_dirty()
 
 

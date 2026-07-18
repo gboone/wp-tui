@@ -32,14 +32,16 @@ class BlockType:
     factory: Callable[[], Block]
 
 
-# One switchable entry per heading level. The default arg pins ``n`` per lambda.
+# One switchable entry per heading level. H2 leads (the common content default that a bare
+# "heading" query should pick) and H1 trails (rarely wanted in post body — the title is H1).
+# The default arg pins ``n`` per lambda.
 _HEADINGS: tuple[BlockType, ...] = tuple(
     BlockType(
         f"Heading {n}",
         frozenset({f"heading {n}", f"h{n}", "heading", "header", "title"}),
         lambda n=n: new_heading_block(n),
     )
-    for n in range(1, 7)
+    for n in (2, 3, 4, 5, 6, 1)
 )
 
 # Registry order is the display order in the picker.

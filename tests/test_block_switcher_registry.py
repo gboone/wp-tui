@@ -40,8 +40,9 @@ def test_h3_query_returns_only_heading_3():
     assert '<h3 class="wp-block-heading">' in serialize([entries[0].factory()])
 
 
-def test_heading_query_returns_all_six_levels_in_order():
-    assert _labels(match("heading")) == [f"Heading {n}" for n in range(1, 7)]
+def test_heading_query_returns_all_six_with_h2_first_h1_last():
+    # H2 leads so a bare "heading" + Enter (top match) inserts H2, not H1.
+    assert _labels(match("heading")) == ["Heading 2", "Heading 3", "Heading 4", "Heading 5", "Heading 6", "Heading 1"]
 
 
 def test_each_heading_entry_builds_its_level():

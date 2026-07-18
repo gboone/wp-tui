@@ -111,10 +111,7 @@ class BlockCanvas(VerticalScroll):
         ``.index`` would return the *first* twin, not the one the user focused. Every
         structural op must locate its target by identity.
         """
-        for i, b in enumerate(self.blocks):
-            if b is block:
-                return i
-        return None
+        return _identity_index(self.blocks, block)
 
     async def move_focused(self, delta: int) -> bool:
         """Move the focused top-level block up (-1) or down (+1). Returns success."""

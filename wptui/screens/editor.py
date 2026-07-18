@@ -188,6 +188,24 @@ class EditorScreen(Screen[None]):
             # The captured block is gone (e.g. deleted before the picker closed).
             self._set_status("Couldn't switch block — it's no longer here.", error=True)
 
+    def on_inline_markdown_area_nested_enter(self, message) -> None:
+        """Enter in a list-item / quote paragraph: split the child, or exit when empty."""
+        if self._canvas is None:
+            return
+        if not message.before and not message.after:
+            self.run_worker(self._canvas.exit_container())
+        else:
+            self.run_worker(self._canvas.split_child(message.before, message.after))
+
+    def on_inline_markdown_area_nested_backspace(self, message) -> None:
+        """Backspace at the start of a child: remove it (empty) or merge into the previous."""
+        if self._canvas is None:
+            return
+        if message.empty:
+            self.run_worker(self._canvas.remove_child())
+        else:
+            self.run_worker(self._canvas.merge_child_into_previous())
+
     def on_inline_markdown_area_vim_command(self, message) -> None:
         """Handle ``:w`` / ``:q`` from a Vim command line."""
         if message.name == "save":

@@ -31,6 +31,8 @@ class TextBlockEditor(Vertical):
 
     def compose(self) -> ComposeResult:
         name = (self.block.block_name or "").removeprefix("core/")
+        if self.block.block_name == "core/heading":
+            name = f"heading {self.block.attributes.get('level', 2)}"
         yield Static(name, classes="block-label")
         yield InlineMarkdownArea(self._markdown, id="body", classes="block-body")
 

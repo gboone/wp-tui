@@ -29,12 +29,14 @@ from wptui.blocks.containers import identity_index as _identity_index
 from wptui.blocks.factory import new_paragraph_block, separator_freeform, set_heading_level
 from wptui.blocks.model import Block
 from wptui.blocks.serialize import propagate_dirty
+from wptui.blocks.table import parse_table
 from wptui.blocks.text import get_editable_body, set_editable_body
 from wptui.inline import html_to_markdown, markdown_to_html
 from wptui.widgets.image_card import ImageCard
 from wptui.widgets.inline_area import InlineMarkdownArea
 from wptui.widgets.opaque_card import OpaqueCard
 from wptui.widgets.separator_card import SeparatorCard
+from wptui.widgets.table_editor import TableEditor
 from wptui.widgets.text_block import TextBlockEditor
 
 # Text blocks that get an inline editor when they have a single wrapper and no children.
@@ -86,6 +88,10 @@ class BlockCanvas(VerticalScroll):
             card = ImageCard(block)
             self._editors.append(card)
             yield self._track(card, owner, depth)
+        elif kind == "table":
+            editor = TableEditor(block)
+            self._editors.append(editor)
+            yield self._track(editor, owner, depth)
         elif kind == "separator":
             yield self._track(SeparatorCard(block), owner, depth)
         elif kind == "container":
@@ -528,6 +534,8 @@ def _classify(block: Block) -> str:
         return "separator"
     if block.block_name == "core/image":
         return "image"
+    if block.block_name == "core/table" and parse_table(block.inner_html).editable:
+        return "table"  # a nested/unparseable table falls through to opaque
     if block.block_name in _CONTAINERS and block.inner_blocks:
         return "container"
     if (

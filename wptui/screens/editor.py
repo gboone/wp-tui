@@ -217,6 +217,16 @@ class EditorScreen(Screen[None]):
         if self._canvas is not None:
             await self._canvas.nested_backspace()
 
+    async def on_inline_markdown_area_indent_requested(self, message) -> None:
+        """Tab in a list-item: indent it under the previous sibling."""
+        if self._canvas is not None:
+            await self._canvas.indent_focused()
+
+    async def on_inline_markdown_area_outdent_requested(self, message) -> None:
+        """Shift+Tab in a list-item: outdent it to the enclosing list."""
+        if self._canvas is not None:
+            await self._canvas.outdent_focused()
+
     def on_inline_markdown_area_vim_command(self, message) -> None:
         """Handle ``:w`` / ``:q`` from a Vim command line."""
         if message.name == "save":

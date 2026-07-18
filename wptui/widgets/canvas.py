@@ -3,8 +3,9 @@
 Editable text blocks (paragraph, heading, code, preformatted, and — via container
 descent — list items and quote paragraphs) render as inline editors; separators and
 opaque passthrough blocks render as focusable cards. Structural operations (move, delete,
-insert) act on the *top-level* block that owns the focused widget; nested reordering is
-deferred. Editing a nested child dirties its ancestors at ``sync()`` time via
+insert) act on the *top-level* block that owns the focused widget. List-items can be
+reordered across nesting levels (Tab/Shift+Tab); other nested reordering is deferred.
+Editing a nested child dirties its ancestors at ``sync()`` time via
 :func:`propagate_dirty` so the parent re-serializes rather than re-emitting stale source.
 """
 
@@ -15,7 +16,16 @@ from textual.css.query import NoMatches
 from textual.widget import Widget
 from textual.widgets import Static
 
-from wptui.blocks.containers import child_factory_for, set_container_children
+from wptui.blocks.containers import (
+    MAX_LIST_NEST_DEPTH,
+    child_factory_for,
+    indent_item,
+    list_depth,
+    outdent_item,
+    set_container_children,
+    subtree_list_height,
+)
+from wptui.blocks.containers import identity_index as _identity_index
 from wptui.blocks.factory import new_paragraph_block, separator_freeform, set_heading_level
 from wptui.blocks.model import Block
 from wptui.blocks.serialize import propagate_dirty
@@ -54,12 +64,24 @@ class BlockCanvas(VerticalScroll):
         for block in self.blocks:
             yield from self._render_block(block, owner=block, depth=0)
 
-    def _render_block(self, block: Block, *, owner: Block, depth: int):
+    def _render_block(self, block: Block, *, owner: Block, depth: int, structural: bool = False):
+        if block.block_name == "core/list-item":
+            # A list-item is its own text editor plus, if it holds a nested list, a descent
+            # into that sublist (WordPress nests a core/list inside the <li>). A list-item is
+            # always a structural child of its list, at any depth.
+            widget = TextBlockEditor(block)
+            self._editors.append(widget)
+            tracked = self._track(widget, owner, depth, structural=True)
+            tracked.add_class("list-item")  # Tab/Shift+Tab indent applies only to list-items
+            yield tracked
+            for child in block.inner_blocks:
+                yield from self._render_block(child, owner=owner, depth=depth + 1, structural=True)
+            return
         kind = _classify(block)
         if kind == "editor":
             widget = TextBlockEditor(block)
             self._editors.append(widget)
-            yield self._track(widget, owner, depth)
+            yield self._track(widget, owner, depth, structural=structural)
         elif kind == "image":
             card = ImageCard(block)
             self._editors.append(card)
@@ -67,24 +89,25 @@ class BlockCanvas(VerticalScroll):
         elif kind == "separator":
             yield self._track(SeparatorCard(block), owner, depth)
         elif kind == "container":
-            name = (block.block_name or "").removeprefix("core/")
-            yield self._track(Static(f"▾ {name}", classes="container-label"), owner, depth)
+            if depth == 0:  # a nested list's label would just be noise under its parent item
+                name = (block.block_name or "").removeprefix("core/")
+                yield self._track(Static(f"▾ {name}", classes="container-label"), owner, depth)
             for child in block.inner_blocks:
-                yield from self._render_block(child, owner=owner, depth=depth + 1)
+                yield from self._render_block(child, owner=owner, depth=depth + 1, structural=True)
         elif kind == "opaque":
             yield self._track(OpaqueCard(block), owner, depth)
         # whitespace-only freeform: kept in the model, not shown.
 
-    def _track(self, widget: Widget, owner: Block, depth: int) -> Widget:
+    def _track(self, widget: Widget, owner: Block, depth: int, structural: bool = False) -> Widget:
         self._owner[widget] = owner
         if depth:
             # Semantic signal, not only styling: InlineMarkdownArea._slash_triggers reads
             # "nested" (any depth) to keep the "/" switcher from firing inside a child.
             widget.add_class("nested")
-        if depth == 1:
-            # A direct child of a top-level container (a list-item, a quote paragraph) —
-            # the only depth Enter/Backspace structural editing operates on. Deeper nesting
-            # (a list inside a quote) is left to default key handling.
+        if structural:
+            # A container child (a list-item at any depth, a quote paragraph) — the editors
+            # Enter/Backspace/Tab structural editing operates on. Depth-independent, so nested
+            # list-items (and a list nested in a quote) are editable too.
             widget.add_class("container-child")
         return widget
 
@@ -217,6 +240,34 @@ class BlockCanvas(VerticalScroll):
             return await self.exit_container()
         return await self.split_child(before, after)
 
+    async def indent_focused(self) -> bool:
+        """Tab: indent the focused list-item into a sublist under its previous sibling."""
+        found = self._focused_child()
+        if found is None or found[0].block_name != "core/list":
+            return False
+        enclosing_list, item = found
+        self.sync()
+        # Indenting deepens the item AND everything below it by one; block if the deepest
+        # descendant would pass the cap, not just the item itself.
+        if list_depth(self._ancestry(item)) + subtree_list_height(item) >= MAX_LIST_NEST_DEPTH:
+            return False
+        if not indent_item(enclosing_list, item):
+            return False
+        await self._rerender(focus=item, caret="end")
+        return True
+
+    async def outdent_focused(self) -> bool:
+        """Shift+Tab: outdent the focused list-item to the enclosing list."""
+        found = self._focused_child()
+        if found is None or found[0].block_name != "core/list":
+            return False
+        item = found[1]
+        self.sync()
+        if not outdent_item(self._ancestry(item), item):
+            return False
+        await self._rerender(focus=item, caret="end")
+        return True
+
     async def nested_backspace(self) -> bool:
         """Handle Backspace at the start of a container child: remove it when empty, else
         merge it into the previous child. Reads the live editor to stay queue-safe."""
@@ -340,17 +391,41 @@ class BlockCanvas(VerticalScroll):
         focused = self.screen.focused
         return focused if isinstance(focused, InlineMarkdownArea) else None
 
-    def _focused_child(self) -> tuple[Block, Block] | None:
-        """``(container, child)`` when a nested container child is focused, else ``None``.
+    def _container_of(self, target: Block, blocks: list[Block] | None = None) -> Block | None:
+        """The block whose ``inner_blocks`` directly holds ``target`` (by identity), searching
+        the whole tree — the *immediate* parent, not the top-level owner. ``None`` for a
+        top-level block."""
+        for block in self.blocks if blocks is None else blocks:
+            if any(child is target for child in block.inner_blocks):
+                return block
+            found = self._container_of(target, block.inner_blocks)
+            if found is not None:
+                return found
+        return None
 
-        The focused editor's ``.block`` is the child; its ``_owner`` entry is the top-level
-        container. A top-level editor owns itself (``owner is child``) — not nested."""
+    def _ancestry(self, target: Block) -> list[Block]:
+        """The chain of containers from top-level down to ``target``'s immediate parent
+        (e.g. ``[enclosing_list, parent_item, sublist]`` for a doubly-nested item). Empty if
+        ``target`` is top-level."""
+        chain: list[Block] = []
+        node = self._container_of(target)
+        while node is not None:
+            chain.append(node)
+            node = self._container_of(node)
+        chain.reverse()
+        return chain
+
+    def _focused_child(self) -> tuple[Block, Block] | None:
+        """``(immediate_parent, child)`` when a container child is focused, else ``None``.
+
+        Resolves the immediate parent by tree walk (not the top-level owner), so structural
+        editing works on the child's own list at any nesting depth."""
         editor = self._focused_editor()
         if editor is None:
             return None
         child = editor.block
-        container = self._owner.get(editor)
-        if container is None or container is child:
+        container = self._container_of(child)
+        if container is None:
             return None
         return container, child
 
@@ -431,12 +506,6 @@ class BlockCanvas(VerticalScroll):
                 return widget
         return None
 
-def _identity_index(blocks: list[Block], target: Block) -> int | None:
-    """Index by identity (list.index would match a structural twin — two empty items)."""
-    for i, block in enumerate(blocks):
-        if block is target:
-            return i
-    return None
 
 
 def _offset_to_location(text: str, offset: int) -> tuple[int, int]:

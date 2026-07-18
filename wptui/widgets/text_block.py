@@ -14,7 +14,7 @@ from textual.containers import Vertical
 from textual.widgets import Static
 
 from wptui.blocks.model import Block
-from wptui.blocks.text import get_editable_body, set_editable_body
+from wptui.blocks.text import get_editable_body, set_editable_body, set_list_item_body
 from wptui.inline import html_to_markdown, markdown_to_html
 from wptui.widgets.inline_area import InlineMarkdownArea
 
@@ -42,5 +42,8 @@ class TextBlockEditor(Vertical):
         new_markdown = area.text
         if new_markdown != self._markdown:
             new_html = markdown_to_html(new_markdown)
-            set_editable_body(self.block, new_html)
+            if self.block.block_name == "core/list-item":
+                set_list_item_body(self.block, new_html)  # preserves a nested sublist
+            else:
+                set_editable_body(self.block, new_html)
             self._markdown = new_markdown

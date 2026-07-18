@@ -81,6 +81,7 @@ def set_list_item_body(item: Block, new_body: str) -> bool:
     first = item.inner_content[0]
     if not isinstance(first, str):
         return False
+    # Same opening-tag shape as _WRAPPER_RE's prefix, narrowed to <li>.
     opening = re.match(r"\s*<li(?:\s[^>]*)?>", first)
     if opening is None:
         return False

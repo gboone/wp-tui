@@ -76,22 +76,86 @@ def test_outdent_moves_item_up_and_drops_empty_sublist():
     assert _roundtrips(lst)
 
 
-def test_outdent_keeps_following_siblings_in_sublist():
+def test_outdent_reparents_following_siblings_under_the_item():
+    # Outdenting b (first of a's sublist [b, c]) pulls c out under b, preserving visual order.
     lst, items = _list("a", "b", "c")
     indent_item(lst, items[1])  # a(sub:[b]), c
     indent_item(lst, items[2])  # a(sub:[b, c])
     a = lst.inner_blocks[0]
-    sub = _sublist_of(a)
-    chain = [lst, a, sub]
+    chain = [lst, a, _sublist_of(a)]
     assert outdent_item(chain, items[1])  # outdent b
-    assert _bodies(lst.inner_blocks) == ["a", "b"]  # b after a
-    sub_after = _sublist_of(lst.inner_blocks[0])
-    assert sub_after is not None and _bodies(sub_after.inner_blocks) == ["c"]  # c stays nested
+    assert _bodies(lst.inner_blocks) == ["a", "b"]
+    assert _sublist_of(lst.inner_blocks[0]) is None  # a emptied (b was first)
+    assert _bodies(_sublist_of(lst.inner_blocks[1]).inner_blocks) == ["c"]  # c now under b
+
+
+def test_indent_moves_item_with_its_own_sublist_as_a_unit():
+    # a, b(sub:[x]), c  ->  indent b under a keeps b's own sublist [x] intact.
+    lst, items = _list("a", "b", "c")
+    indent_item(lst, items[2])  # a, b(sub:[c])  -- give b a sublist by nesting c under it
+    # now a, b(sub:[c]); indent b under a
+    assert indent_item(lst, items[1])
+    assert _bodies(lst.inner_blocks) == ["a"]
+    b = _sublist_of(lst.inner_blocks[0]).inner_blocks[0]
+    assert get_editable_body(b) == "b"
+    assert _bodies(_sublist_of(b).inner_blocks) == ["c"]  # b kept its sublist
+    assert _roundtrips(lst)
+
+
+def test_indent_preserves_ordered_list_kind():
+    lst, items = _list("a", "b", ordered=True)
+    indent_item(lst, items[1])
+    sub = _sublist_of(lst.inner_blocks[0])
+    assert sub.attributes.get("ordered") is True
+    assert "<ol" in serialize([lst])
+
+
+def test_nest_then_unnest_is_byte_identical():
+    lst, items = _list("a", "b")
+    original = serialize([lst])
+    indent_item(lst, items[1])
+    a = lst.inner_blocks[0]
+    outdent_item([lst, a, _sublist_of(a)], items[1])
+    assert serialize([lst]) == original
 
 
 def test_outdent_at_top_level_is_noop():
     lst, items = _list("a", "b")
     assert outdent_item([lst], items[1]) is False
+
+
+def test_outdent_through_a_quote_is_a_safe_noop():
+    # list > item A > quote > list > item b. Outdenting b must NOT corrupt the quote — the
+    # chain is interrupted by a non-list container, so it's a no-op.
+    from wptui.blocks.factory import new_quote_block
+
+    inner_list, inner_items = _list("b")
+    quote = new_quote_block()
+    set_container_children(quote, [inner_list])
+    outer_item = _item_with_sublist_block("A", quote)
+    top = _wrap_list_block([outer_item])
+    before = serialize([top])
+    chain = [top, outer_item, quote, inner_list]  # …, enclosing?, parent?, sublist
+    assert outdent_item(chain, inner_items[0]) is False
+    assert serialize([top]) == before  # quote intact
+
+
+def _item_with_sublist_block(text, container):
+    from wptui.blocks.model import Block
+
+    return Block(
+        block_name="core/list-item",
+        inner_blocks=[container],
+        inner_content=[f"\n<li>{text}", None, "</li>\n"],
+        inner_html=f"\n<li>{text}</li>\n",
+        dirty=True,
+    )
+
+
+def _wrap_list_block(items):
+    lst = new_list_block()
+    set_container_children(lst, items)
+    return lst
 
 
 def test_list_depth_and_cap():
@@ -181,22 +245,73 @@ async def test_tab_on_first_item_is_noop():
         assert _list_count(canvas) == 1  # unchanged
 
 
+def _item_with_sublist(text, sublist):
+    from wptui.blocks.model import Block
+
+    return Block(
+        block_name="core/list-item",
+        inner_blocks=[sublist],
+        inner_content=[f"\n<li>{text}", None, "</li>\n"],
+        inner_html=f"\n<li>{text}</li>\n",
+        dirty=True,
+    )
+
+
+def _wrap_list(items):
+    lst = new_list_block()
+    set_container_children(lst, items)
+    return lst
+
+
+def _depth_four_list():
+    # L1[a(L2[b(L3[c(L4[x, y])])])] — x and y sit at nesting depth 4.
+    l4 = _wrap_list([_item("x"), _item("y")])
+    l3 = _wrap_list([_item_with_sublist("c", l4)])
+    l2 = _wrap_list([_item_with_sublist("b", l3)])
+    return _wrap_list([_item_with_sublist("a", l2)])
+
+
 @pytest.mark.asyncio
-async def test_tab_respects_the_depth_cap():
+async def test_tab_at_the_depth_cap_is_a_noop():
     app = WPTuiApp()
-    app.client = _Client(_list_doc("a", "b", "c", "d", "e"))
+    app.client = _Client(serialize([_depth_four_list()]))
     async with app.run_test() as pilot:
         await pilot.pause()
         canvas = await _push(app, pilot)
-        # Indent the 2nd editor repeatedly; each Tab nests the current item one deeper.
-        for _ in range(6):  # more than the cap
-            editors = [e for e in canvas._editors]
-            editors[1].query_one("#body").focus()
-            await pilot.pause()
-            await pilot.press("tab")
-            await _settle(pilot)
-        # 5 items, capped at depth 4 -> at most 4 list levels.
-        assert _list_count(canvas) <= 4
+        before = serialize(canvas.blocks)
+        # editors render a, b, c, x, y -> focus y (depth 4, has previous sibling x)
+        canvas._editors[4].query_one("#body").focus()
+        await pilot.pause()
+        await pilot.press("tab")
+        await _settle(pilot)
+        assert _list_count(canvas) == 4  # capped — no deeper nesting
+        assert serialize(canvas.blocks) == before
+
+
+@pytest.mark.asyncio
+async def test_tab_in_a_quote_paragraph_does_not_indent():
+    from wptui.blocks.factory import new_paragraph_block, new_quote_block
+    from wptui.blocks.text import set_editable_body
+
+    quote = new_quote_block()
+    paras = []
+    for t in ("one", "two"):
+        p = new_paragraph_block()
+        set_editable_body(p, t)
+        paras.append(p)
+    set_container_children(quote, paras)
+    app = WPTuiApp()
+    app.client = _Client(serialize([quote]))
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        canvas = await _push(app, pilot)
+        before = serialize(canvas.blocks)
+        canvas._editors[1].query_one("#body").focus()  # a quote paragraph
+        await pilot.pause()
+        await pilot.press("tab")
+        await _settle(pilot)
+        assert "<!-- wp:list -->" not in serialize(canvas.blocks)  # no list created
+        assert serialize(canvas.blocks) == before
 
 
 @pytest.mark.asyncio

@@ -3,8 +3,9 @@
 Editable text blocks (paragraph, heading, code, preformatted, and — via container
 descent — list items and quote paragraphs) render as inline editors; separators and
 opaque passthrough blocks render as focusable cards. Structural operations (move, delete,
-insert) act on the *top-level* block that owns the focused widget; nested reordering is
-deferred. Editing a nested child dirties its ancestors at ``sync()`` time via
+insert) act on the *top-level* block that owns the focused widget. List-items can be
+reordered across nesting levels (Tab/Shift+Tab); other nested reordering is deferred.
+Editing a nested child dirties its ancestors at ``sync()`` time via
 :func:`propagate_dirty` so the parent re-serializes rather than re-emitting stale source.
 """
 
@@ -22,7 +23,9 @@ from wptui.blocks.containers import (
     list_depth,
     outdent_item,
     set_container_children,
+    subtree_list_height,
 )
+from wptui.blocks.containers import identity_index as _identity_index
 from wptui.blocks.factory import new_paragraph_block, separator_freeform, set_heading_level
 from wptui.blocks.model import Block
 from wptui.blocks.serialize import propagate_dirty
@@ -244,7 +247,9 @@ class BlockCanvas(VerticalScroll):
             return False
         enclosing_list, item = found
         self.sync()
-        if list_depth(self._ancestry(item)) >= MAX_LIST_NEST_DEPTH:
+        # Indenting deepens the item AND everything below it by one; block if the deepest
+        # descendant would pass the cap, not just the item itself.
+        if list_depth(self._ancestry(item)) + subtree_list_height(item) >= MAX_LIST_NEST_DEPTH:
             return False
         if not indent_item(enclosing_list, item):
             return False
@@ -501,12 +506,6 @@ class BlockCanvas(VerticalScroll):
                 return widget
         return None
 
-def _identity_index(blocks: list[Block], target: Block) -> int | None:
-    """Index by identity (list.index would match a structural twin — two empty items)."""
-    for i, block in enumerate(blocks):
-        if block is target:
-            return i
-    return None
 
 
 def _offset_to_location(text: str, offset: int) -> tuple[int, int]:

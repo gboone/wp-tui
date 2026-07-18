@@ -67,3 +67,24 @@ def set_editable_body(block: Block, new_body: str) -> bool:
     block.inner_blocks = []
     block.mark_dirty()
     return True
+
+
+def set_list_item_body(item: Block, new_body: str) -> bool:
+    """Write ``new_body`` into a ``core/list-item``, preserving a nested sublist.
+
+    A leaf item (no child blocks) is written like any single-wrapper block. An item that
+    holds a nested list keeps it: only the text before the child placeholder — the ``<li…>``
+    opening chunk of ``inner_content`` — is rewritten, leaving the placeholder and
+    ``inner_blocks`` untouched (``set_editable_body`` would clear them)."""
+    if not any(chunk is None for chunk in item.inner_content):
+        return set_editable_body(item, new_body)
+    first = item.inner_content[0]
+    if not isinstance(first, str):
+        return False
+    opening = re.match(r"\s*<li(?:\s[^>]*)?>", first)
+    if opening is None:
+        return False
+    item.inner_content = [opening.group(0) + new_body, *item.inner_content[1:]]
+    item.inner_html = "".join(chunk for chunk in item.inner_content if chunk is not None)
+    item.mark_dirty()
+    return True

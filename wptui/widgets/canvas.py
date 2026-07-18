@@ -55,6 +55,15 @@ class BlockCanvas(VerticalScroll):
             yield from self._render_block(block, owner=block, depth=0)
 
     def _render_block(self, block: Block, *, owner: Block, depth: int):
+        if block.block_name == "core/list-item":
+            # A list-item is its own text editor plus, if it holds a nested list, a descent
+            # into that sublist (WordPress nests a core/list inside the <li>).
+            widget = TextBlockEditor(block)
+            self._editors.append(widget)
+            yield self._track(widget, owner, depth)
+            for child in block.inner_blocks:
+                yield from self._render_block(child, owner=owner, depth=depth + 1)
+            return
         kind = _classify(block)
         if kind == "editor":
             widget = TextBlockEditor(block)
@@ -67,8 +76,9 @@ class BlockCanvas(VerticalScroll):
         elif kind == "separator":
             yield self._track(SeparatorCard(block), owner, depth)
         elif kind == "container":
-            name = (block.block_name or "").removeprefix("core/")
-            yield self._track(Static(f"▾ {name}", classes="container-label"), owner, depth)
+            if depth == 0:  # a nested list's label would just be noise under its parent item
+                name = (block.block_name or "").removeprefix("core/")
+                yield self._track(Static(f"▾ {name}", classes="container-label"), owner, depth)
             for child in block.inner_blocks:
                 yield from self._render_block(child, owner=owner, depth=depth + 1)
         elif kind == "opaque":

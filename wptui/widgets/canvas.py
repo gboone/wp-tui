@@ -75,6 +75,8 @@ class BlockCanvas(VerticalScroll):
     def _track(self, widget: Widget, owner: Block, depth: int) -> Widget:
         self._owner[widget] = owner
         if depth:
+            # Also a semantic signal, not only styling: InlineMarkdownArea._slash_triggers
+            # reads this class to keep the "/" switcher from firing inside a nested child.
             widget.add_class("nested")
         return widget
 
@@ -93,12 +95,27 @@ class BlockCanvas(VerticalScroll):
 
     # -- structural operations (top-level blocks) -------------------------
 
+    def _index_of(self, block: Block) -> int | None:
+        """Identity-based index of ``block`` in ``self.blocks``.
+
+        ``list.index``/``in`` compare by value, and ``Block`` is a plain dataclass — so
+        two structurally-identical blocks (e.g. two empty paragraphs) are equal and
+        ``.index`` would return the *first* twin, not the one the user focused. Every
+        structural op must locate its target by identity.
+        """
+        for i, b in enumerate(self.blocks):
+            if b is block:
+                return i
+        return None
+
     async def move_focused(self, delta: int) -> bool:
         """Move the focused top-level block up (-1) or down (+1). Returns success."""
         block = self._focused_owner()
         if block is None:
             return False
-        index = self.blocks.index(block)
+        index = self._index_of(block)
+        if index is None:
+            return False
         target = self._neighbor_content_index(index, delta)
         if target is None:
             return False
@@ -113,7 +130,9 @@ class BlockCanvas(VerticalScroll):
         if block is None:
             return False
         self.sync()
-        index = self.blocks.index(block)
+        index = self._index_of(block)
+        if index is None:
+            return False
         # Focus a surviving neighbour after removal.
         neighbor_i = self._neighbor_content_index(index, +1) or self._neighbor_content_index(
             index, -1
@@ -128,15 +147,41 @@ class BlockCanvas(VerticalScroll):
         """Insert a new empty paragraph after the focused top-level block."""
         return await self.insert_block(new_paragraph_block())
 
+    def focused_block(self) -> Block | None:
+        """The top-level block owning the currently focused widget, or ``None``."""
+        return self._focused_owner()
+
+    async def replace_focused(self, new_block: Block) -> bool:
+        """Replace the focused top-level block with ``new_block`` at the same position."""
+        block = self._focused_owner()
+        if block is None:
+            return False
+        return await self.replace_block(block, new_block)
+
+    async def replace_block(self, old: Block, new_block: Block) -> bool:
+        """Replace a specific top-level block with ``new_block`` at the same position.
+
+        Used by the slash-command switcher, which captures the target block *before*
+        opening the picker modal (focus moves to the modal), then converts that exact
+        block on selection. No separator is added — this is a positional swap.
+        """
+        self.sync()
+        index = self._index_of(old)
+        if index is None:
+            return False
+        self.blocks[index] = new_block
+        await self._rerender(focus=new_block)
+        return True
+
     async def insert_block(self, new_block: Block) -> bool:
         """Insert an arbitrary new top-level block after the focused one (or at the end)."""
         block = self._focused_owner()
         self.sync()
-        if block is None:
+        index = None if block is None else self._index_of(block)
+        if index is None:
             self.blocks.append(separator_freeform())
             self.blocks.append(new_block)
         else:
-            index = self.blocks.index(block)
             self.blocks[index + 1 : index + 1] = [separator_freeform(), new_block]
         await self._rerender(focus=new_block)
         return True
@@ -186,6 +231,12 @@ class BlockCanvas(VerticalScroll):
 
     def _focus_widget_for(self, target: Block) -> Widget | None:
         """The widget that should receive focus for a top-level block (inner field first)."""
+        # For a container (list/quote), focus its first rendered child editor so the user
+        # can type the first item/line immediately, not the container's label.
+        if target.block_name in _CONTAINERS and target.inner_blocks:
+            for widget, owner in self._owner.items():
+                if owner is target and isinstance(widget, TextBlockEditor):
+                    return widget.query_one("#body")
         for widget, owner in self._owner.items():
             if isinstance(widget, TextBlockEditor) and widget.block is target:
                 return widget.query_one("#body")

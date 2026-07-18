@@ -32,6 +32,27 @@ def test_no_match_returns_empty():
     assert match("nonsense-xyz") == []
 
 
+def test_h3_query_returns_only_heading_3():
+    from wptui.blocks import serialize
+
+    entries = match("h3")
+    assert _labels(entries) == ["Heading 3"]
+    assert '<h3 class="wp-block-heading">' in serialize([entries[0].factory()])
+
+
+def test_heading_query_returns_all_six_with_h2_first_h1_last():
+    # H2 leads so a bare "heading" + Enter (top match) inserts H2, not H1.
+    assert _labels(match("heading")) == ["Heading 2", "Heading 3", "Heading 4", "Heading 5", "Heading 6", "Heading 1"]
+
+
+def test_each_heading_entry_builds_its_level():
+    from wptui.blocks import serialize
+
+    for n in range(1, 7):
+        entry = match(f"h{n}")[0]
+        assert f"<h{n} " in serialize([entry.factory()])
+
+
 def test_alias_matching_is_prefix_not_substring():
     # Aliases match by prefix so a short query can't hit mid-word: "der" must not match
     # inside "ordered list", and "ule" must not match inside "horizontal rule".

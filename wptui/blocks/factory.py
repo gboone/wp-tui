@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import re
 from html import escape
 from typing import TYPE_CHECKING
 
 from wptui.blocks.model import Block
+from wptui.blocks.text import split_wrapper
 
 if TYPE_CHECKING:  # avoid a runtime dependency; factory stays in the headless layer
     from wptui.api.dto import MediaItem
@@ -37,6 +39,32 @@ def new_heading_block(level: int = 2) -> Block:
     return _leaf_block(
         "core/heading", f'\n<h{level} class="wp-block-heading"></h{level}>\n', attributes
     )
+
+
+def set_heading_level(block: Block, level: int) -> None:
+    """Change a ``core/heading`` block's level in place, preserving its body.
+
+    Swaps only the wrapper tag name — whatever ``<h1..6>`` is actually there, so a heading
+    whose attribute and tag disagree is corrected rather than left inconsistent — and keeps
+    any other wrapper attributes (an anchor id, alignment class) intact. Updates the
+    ``level`` attribute to match WordPress (``level`` omitted for the default H2).
+
+    No-op when the block already sits at ``level`` (preserving its exact bytes) or when its
+    inner HTML isn't a recognizable single wrapper (nothing safe to swap)."""
+    wrapped = split_wrapper(block.inner_html)
+    if wrapped is None or block.attributes.get("level", 2) == level:
+        return
+    prefix = re.sub(r"<h[1-6]", f"<h{level}", wrapped.prefix, count=1)
+    suffix = re.sub(r"</h[1-6]>", f"</h{level}>", wrapped.suffix, count=1)
+    inner = f"{prefix}{wrapped.body}{suffix}"
+    block.inner_html = inner
+    block.inner_content = [inner]
+    if level == 2:
+        block.attributes.pop("level", None)
+    else:
+        block.attributes["level"] = level
+    block.attributes_raw = None  # level changed — re-encode (WP re-normalizes on save)
+    block.mark_dirty()
 
 
 def new_list_item(body: str = "") -> Block:

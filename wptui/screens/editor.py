@@ -44,6 +44,7 @@ class EditorScreen(Screen[None]):
         Binding("ctrl+down", "move_down", "Move down", priority=True),
         Binding("ctrl+n", "insert_paragraph", "New ¶", priority=True),
         Binding("ctrl+g", "add_image", "Add image", priority=True),
+        Binding("f3", "heading_level", "Heading level", priority=True),
         Binding("ctrl+delete", "delete_block", "Delete block", priority=True),
         ("escape", "app.pop_screen", "Back"),
     ]
@@ -154,6 +155,22 @@ class EditorScreen(Screen[None]):
         from wptui.widgets.media_picker import MediaPickerModal
 
         self.app.push_screen(MediaPickerModal(), self._image_uploaded)
+
+    def action_heading_level(self) -> None:
+        """Open the heading-level picker for the focused heading (no-op otherwise)."""
+        if self._canvas is None:
+            return
+        target = self._canvas.focused_block()
+        if target is None or target.block_name != "core/heading":
+            return
+        from wptui.widgets.heading_level import HeadingLevelModal
+
+        self.app.push_screen(HeadingLevelModal(), lambda level: self._apply_heading_level(target, level))
+
+    def _apply_heading_level(self, target, level) -> None:
+        if level is None or self._canvas is None:
+            return
+        self.run_worker(self._canvas.set_heading_level_on(target, level))
 
     def _image_uploaded(self, media) -> None:
         if media is None or self._canvas is None:

@@ -11,7 +11,9 @@ from wptui.blocks.factory import (
     new_preformatted_block,
     new_quote_block,
     new_separator_block,
+    set_heading_level,
 )
+from wptui.blocks.text import set_editable_body
 from wptui.blocks.model import EDITABLE_BLOCKS
 from wptui.blocks.text import get_editable_body
 
@@ -121,6 +123,62 @@ def test_list_and_quote_expose_one_editable_child():
     for container in (new_list_block(), new_quote_block()):
         assert len(container.inner_blocks) == 1
         assert get_editable_body(container.inner_blocks[0]) == ""
+
+
+def test_set_heading_level_h2_to_h3_adds_wrapper_and_attribute():
+    block = new_heading_block(2)
+    set_editable_body(block, "Title")
+    set_heading_level(block, 3)
+    out = serialize([block])
+    assert '<!-- wp:heading {"level":3} -->' in out
+    assert '<h3 class="wp-block-heading">Title</h3>' in out
+    assert _roundtrips(block)
+
+
+def test_set_heading_level_h3_to_h2_drops_attribute():
+    block = new_heading_block(3)
+    set_editable_body(block, "Title")
+    set_heading_level(block, 2)
+    out = serialize([block])
+    assert "level" not in out and '<h2 class="wp-block-heading">Title</h2>' in out
+
+
+def test_set_heading_level_preserves_inline_formatting():
+    block = new_heading_block(2)
+    set_editable_body(block, "a <strong>bold</strong> word")
+    set_heading_level(block, 4)
+    assert "<strong>bold</strong>" in serialize([block])
+
+
+def test_set_heading_level_same_level_is_a_noop_preserving_bytes():
+    # Re-picking the current level must not dirty the block or strip an explicit level:2.
+    src = '<!-- wp:heading {"level":2} -->\n<h2 class="wp-block-heading">Hi</h2>\n<!-- /wp:heading -->'
+    block = parse(src)[0]
+    set_heading_level(block, 2)
+    assert not block.dirty and serialize([block]) == src
+
+
+def test_set_heading_level_corrects_tag_when_attribute_disagrees():
+    # Malformed input: attribute says H2 (absent) but the tag is <h4>. Picking H3 swaps the
+    # real tag and sets the attribute, leaving a consistent block.
+    block = parse('<!-- wp:heading -->\n<h4 class="wp-block-heading">x</h4>\n<!-- /wp:heading -->')[0]
+    set_heading_level(block, 3)
+    out = serialize([block])
+    assert "<h3 " in out and "<h4" not in out and '{"level":3}' in out
+
+
+def test_set_heading_level_preserves_other_wrapper_attributes():
+    # A heading loaded from WordPress with an anchor id must keep it when the level changes.
+    block = parse('<!-- wp:heading -->\n<h2 class="wp-block-heading" id="intro">Hi</h2>\n<!-- /wp:heading -->')[0]
+    set_heading_level(block, 3)
+    out = serialize([block])
+    assert '<h3 class="wp-block-heading" id="intro">Hi</h3>' in out
+
+
+def test_set_heading_level_matches_factory_bytes():
+    changed = new_heading_block(2)
+    set_heading_level(changed, 5)
+    assert serialize([changed]) == serialize([new_heading_block(5)])
 
 
 def test_code_block_editable_body_is_the_code_wrapper():

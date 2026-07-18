@@ -6,7 +6,7 @@ from html import escape
 from typing import TYPE_CHECKING
 
 from wptui.blocks.model import Block
-from wptui.blocks.text import get_editable_body
+from wptui.blocks.text import get_editable_body, split_wrapper
 
 if TYPE_CHECKING:  # avoid a runtime dependency; factory stays in the headless layer
     from wptui.api.dto import MediaItem
@@ -43,11 +43,19 @@ def new_heading_block(level: int = 2) -> Block:
 def set_heading_level(block: Block, level: int) -> None:
     """Change a ``core/heading`` block's level in place, preserving its body.
 
-    Rewrites the wrapper tag and the ``level`` attribute to match ``new_heading_block``'s
-    shape (``level`` omitted for the default H2, present otherwise). Clears
-    ``attributes_raw`` so the changed attributes re-encode, and marks the block dirty."""
-    body = get_editable_body(block) or ""
-    inner = f'\n<h{level} class="wp-block-heading">{body}</h{level}>\n'
+    Swaps only the wrapper tag name (keeping any other wrapper attributes — an anchor id,
+    alignment class — intact) and updates the ``level`` attribute to match WordPress
+    (``level`` omitted for the default H2, present otherwise). Clears ``attributes_raw`` so
+    the changed attributes re-encode, and marks the block dirty. Falls back to a fresh
+    wrapper if the inner HTML isn't a recognizable single wrapper."""
+    old = block.attributes.get("level", 2)
+    wrapped = split_wrapper(block.inner_html)
+    if wrapped is None:
+        inner = f'\n<h{level} class="wp-block-heading">{get_editable_body(block) or ""}</h{level}>\n'
+    else:
+        prefix = wrapped.prefix.replace(f"<h{old}", f"<h{level}", 1)
+        suffix = wrapped.suffix.replace(f"</h{old}>", f"</h{level}>", 1)
+        inner = f"{prefix}{wrapped.body}{suffix}"
     block.inner_html = inner
     block.inner_content = [inner]
     if level == 2:

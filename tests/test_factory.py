@@ -150,6 +150,14 @@ def test_set_heading_level_preserves_inline_formatting():
     assert "<strong>bold</strong>" in serialize([block])
 
 
+def test_set_heading_level_preserves_other_wrapper_attributes():
+    # A heading loaded from WordPress with an anchor id must keep it when the level changes.
+    block = parse('<!-- wp:heading -->\n<h2 class="wp-block-heading" id="intro">Hi</h2>\n<!-- /wp:heading -->')[0]
+    set_heading_level(block, 3)
+    out = serialize([block])
+    assert '<h3 class="wp-block-heading" id="intro">Hi</h3>' in out
+
+
 def test_set_heading_level_matches_factory_bytes():
     changed = new_heading_block(2)
     set_heading_level(changed, 5)

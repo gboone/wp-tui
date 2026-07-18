@@ -227,6 +227,17 @@ MediaPickerModal {
     margin-bottom: 1;
 }
 
+/* Block-type switcher modal (slash command) */
+.switch-title {
+    text-style: bold;
+    color: $accent;
+    margin-bottom: 1;
+}
+
+#block-switcher Input {
+    margin-bottom: 1;
+}
+
 /* Term picker modal */
 TermPicker {
     align: center middle;

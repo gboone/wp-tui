@@ -16,7 +16,7 @@ from textual.widget import Widget
 from textual.widgets import Static
 
 from wptui.blocks.containers import child_factory_for, set_container_children
-from wptui.blocks.factory import new_paragraph_block, separator_freeform
+from wptui.blocks.factory import new_paragraph_block, separator_freeform, set_heading_level
 from wptui.blocks.model import Block
 from wptui.blocks.serialize import propagate_dirty
 from wptui.blocks.text import get_editable_body, set_editable_body
@@ -176,6 +176,16 @@ class BlockCanvas(VerticalScroll):
             return False
         self.blocks[index] = new_block
         await self._rerender(focus=new_block)
+        return True
+
+    async def set_heading_level_on(self, block: Block, level: int) -> bool:
+        """Change ``block``'s heading level in place, preserving its text. Captured before
+        the picker opens (focus moves to the modal), like the switcher's convert path."""
+        if block.block_name != "core/heading" or self._index_of(block) is None:
+            return False
+        self.sync()
+        set_heading_level(block, level)
+        await self._rerender(focus=block)
         return True
 
     async def insert_block(self, new_block: Block) -> bool:

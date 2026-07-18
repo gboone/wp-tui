@@ -238,6 +238,11 @@ MediaPickerModal {
     margin-bottom: 1;
 }
 
+/* Heading level picker modal */
+HeadingLevelModal {
+    align: center middle;
+}
+
 /* Term picker modal */
 TermPicker {
     align: center middle;

@@ -16,6 +16,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from html.parser import HTMLParser
 
+from wptui.inline import html_to_document
+
 
 @dataclass
 class _Cell:
@@ -43,6 +45,13 @@ class _TableParser(HTMLParser):
         self._table_depth = 0
         self._open: _Cell | None = None
         self.nested = False  # a table nested inside a cell — v1 leaves such tables opaque
+        self.malformed = False  # a self-closing <td/>/<th/> — bail to opaque
+
+    def handle_startendtag(self, tag: str, attrs) -> None:
+        # Self-closing <td/>/<th/> (invalid HTML WP never emits) would yield an inverted span;
+        # flag the table so it stays opaque rather than corrupting on serialize.
+        if self._table_depth == 1 and tag in ("td", "th"):
+            self.malformed = True
 
     def _offset(self) -> int:
         line, col = self.getpos()
@@ -128,9 +137,27 @@ class TableModel:
         return "".join(parts)
 
 
+def _has_unmodeled_markup(content: str) -> bool:
+    """Whether a cell holds inline markup the engine can't round-trip (``<br>``, ``<img>``,
+    a ``<span>``…). Editing such a cell would double-escape the markup into literal text, so
+    a table containing one is left opaque (preserved, not editable)."""
+    return any(run.raw for run in html_to_document(content).runs)
+
+
 def parse_table(html: str) -> TableModel:
-    """Parse a table block's ``inner_html`` into a :class:`TableModel`."""
+    """Parse a table block's ``inner_html`` into a :class:`TableModel`.
+
+    The table is editable only when it is safe to edit any cell losslessly: not nested, not
+    malformed, has cells, all spans well-formed, and no cell carries unmodeled markup.
+    """
     parser = _TableParser(html)
     parser.feed(html)
-    editable = not parser.nested and bool(parser.rows) and any(parser.rows)
+    cells = [cell for row in parser.rows for cell in row]
+    editable = (
+        not parser.nested
+        and not parser.malformed
+        and bool(cells)
+        and all(cell.end >= cell.start for cell in cells)
+        and not any(_has_unmodeled_markup(html[cell.start : cell.end]) for cell in cells)
+    )
     return TableModel(html, parser.rows, editable)

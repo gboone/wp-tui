@@ -101,6 +101,35 @@ def test_dirty_tracks_real_changes_only():
     assert m.dirty()
 
 
+def test_cell_with_unmodeled_markup_makes_table_not_editable():
+    # A cell with <br> (or <img>/<span>) can't round-trip through the inline engine — editing
+    # would double-escape it into literal text. Such tables stay opaque (preserved).
+    html = (
+        '<figure class="wp-block-table"><table><tbody>'
+        "<tr><td>Mon<br>9am</td><td>Tue</td></tr></tbody></table></figure>"
+    )
+    assert _model(html).editable is False
+
+
+def test_entities_and_formatting_keep_the_table_editable():
+    # Smart quotes / &nbsp; / bold / links are modeled — the table stays editable and those
+    # bytes survive on untouched cells.
+    html = (
+        '<figure class="wp-block-table"><table><tbody>'
+        '<tr><td>I&#8217;m here</td><td>a&nbsp;b</td>'
+        '<td><strong>x</strong></td><td><a href="https://x">l</a></td></tr>'
+        "</tbody></table></figure>"
+    )
+    m = _model(html)
+    assert m.editable is True
+    assert m.serialize() == html  # untouched -> byte-identical, entities preserved
+
+
+def test_self_closing_cell_is_not_editable():
+    html = '<figure class="wp-block-table"><table><tbody><tr><td/><td>B</td></tr></tbody></table></figure>'
+    assert _model(html).editable is False
+
+
 def test_nested_table_is_marked_not_editable():
     html = (
         '<figure class="wp-block-table"><table><tbody><tr><td>'

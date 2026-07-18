@@ -109,6 +109,64 @@ async def test_editing_parent_text_via_commit_keeps_the_sublist():
         assert "<li>renamed" in out and "child1" in out and "child2" in out
 
 
+def _list_item_count(canvas):
+    return serialize(canvas.blocks).count("<!-- wp:list-item -->")
+
+
+@pytest.mark.asyncio
+async def test_split_in_nested_item_stays_in_its_sublist():
+    # Focus a child item (depth 2) and split — the new sibling joins the SAME sublist,
+    # proving structural editing resolves the immediate parent, not the top-level list.
+    top = _top_list(_parent_with_sublist("parent", "child1", "child2"))
+    app = Harness([top])
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        canvas = app.query_one(BlockCanvas)
+        canvas._editors[1].query_one("#body").focus()  # child1
+        await pilot.pause()
+        assert await canvas.split_child("child1", "")
+        for _ in range(4):
+            await pilot.pause()
+        sublist = top.inner_blocks[0].inner_blocks[0]
+        assert len(sublist.inner_blocks) == 3  # child1, new, child2
+        assert _list_item_count(canvas) == 4  # 1 parent + 3 children
+
+
+@pytest.mark.asyncio
+async def test_remove_empty_nested_item_operates_on_sublist():
+    top = _top_list(_parent_with_sublist("parent", "child1", ""))
+    app = Harness([top])
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        canvas = app.query_one(BlockCanvas)
+        canvas._editors[2].query_one("#body").focus()  # the empty child2
+        await pilot.pause()
+        assert await canvas.remove_child()
+        for _ in range(4):
+            await pilot.pause()
+        assert _list_item_count(canvas) == 2  # parent + child1
+
+
+@pytest.mark.asyncio
+async def test_list_nested_in_a_quote_is_editable():
+    # Regression: a list nested in a quote renders items at depth 2 — previously dead keys.
+    from wptui.blocks.factory import new_quote_block
+
+    inner = _sublist("a", "b")
+    quote = new_quote_block()
+    set_container_children(quote, [inner])
+    app = Harness([quote])
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        canvas = app.query_one(BlockCanvas)
+        canvas._editors[0].query_one("#body").focus()  # list item "a", nested in the quote
+        await pilot.pause()
+        assert await canvas.split_child("a", "")  # operates on the nested list
+        for _ in range(4):
+            await pilot.pause()
+        assert _list_item_count(canvas) == 3  # a, new, b
+
+
 @pytest.mark.asyncio
 async def test_leaf_list_still_renders_and_edits():
     app = Harness([_sublist("a", "b")])

@@ -6,6 +6,7 @@ from html import escape
 from typing import TYPE_CHECKING
 
 from wptui.blocks.model import Block
+from wptui.blocks.text import get_editable_body
 
 if TYPE_CHECKING:  # avoid a runtime dependency; factory stays in the headless layer
     from wptui.api.dto import MediaItem
@@ -37,6 +38,24 @@ def new_heading_block(level: int = 2) -> Block:
     return _leaf_block(
         "core/heading", f'\n<h{level} class="wp-block-heading"></h{level}>\n', attributes
     )
+
+
+def set_heading_level(block: Block, level: int) -> None:
+    """Change a ``core/heading`` block's level in place, preserving its body.
+
+    Rewrites the wrapper tag and the ``level`` attribute to match ``new_heading_block``'s
+    shape (``level`` omitted for the default H2, present otherwise). Clears
+    ``attributes_raw`` so the changed attributes re-encode, and marks the block dirty."""
+    body = get_editable_body(block) or ""
+    inner = f'\n<h{level} class="wp-block-heading">{body}</h{level}>\n'
+    block.inner_html = inner
+    block.inner_content = [inner]
+    if level == 2:
+        block.attributes.pop("level", None)
+    else:
+        block.attributes["level"] = level
+    block.attributes_raw = None
+    block.mark_dirty()
 
 
 def new_list_item(body: str = "") -> Block:

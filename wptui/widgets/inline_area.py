@@ -87,6 +87,14 @@ class InlineMarkdownArea(TextArea):
     class SlashRequested(Message):
         """Bubbled when the user types ``/`` on an empty block, to open the block switcher."""
 
+    class NestedEnter(Message):
+        """Enter pressed in a container child — the editor re-reads live text/caret to
+        split (or exit when empty), so the signal carries no (stale) payload."""
+
+    class NestedBackspace(Message):
+        """Backspace at the start of a container child — the editor re-reads live state to
+        remove (empty) or merge (non-empty)."""
+
     def __init__(self, text: str, **kwargs) -> None:
         super().__init__(text, **kwargs)
         self.register_theme(_inline_theme())
@@ -111,23 +119,54 @@ class InlineMarkdownArea(TextArea):
             self.border_title = ""
             self.remove_class("vim")
 
+    def _in_text_entry(self) -> bool:
+        """True when keys type text: non-vim, or vim INSERT (not a NORMAL/VISUAL motion)."""
+        return not (self._vim_enabled and self._vim.mode is not Mode.INSERT)
+
+    def _is_nested_child(self) -> bool:
+        """Whether this editor renders any nested child (``nested`` class, depth > 0) —
+        used to keep the ``/`` switcher from firing inside a container."""
+        parent = self.parent
+        return parent is not None and parent.has_class("nested")
+
+    def _is_container_child(self) -> bool:
+        """Whether this editor is a *direct* child of a top-level container (``container-child``
+        class, depth == 1) — the only depth Enter/Backspace edit structurally."""
+        parent = self.parent
+        return parent is not None and parent.has_class("container-child")
+
     def _slash_triggers(self, event: events.Key) -> bool:
         """Whether ``/`` should open the block switcher: an empty top-level block in a
         text-entry context. In Vim NORMAL/VISUAL ``/`` is a movement key, so it is left
-        alone there; and a nested empty child (a list-item, a quote's paragraph) types
-        ``/`` literally rather than replacing its whole container."""
+        alone there; and a nested empty child types ``/`` literally rather than replacing
+        its whole container."""
         if event.character != "/" or self.text != "":
             return False
-        if self._vim_enabled and self._vim.mode is not Mode.INSERT:
+        return self._in_text_entry() and not self._is_nested_child()
+
+    def _nested_structural_key(self, event: events.Key) -> bool:
+        """Post a structural signal for Enter / Backspace-at-start when a direct container
+        child is focused. Returns whether the key was consumed. The editor (canvas) reads
+        live text/caret when it handles the signal, so nothing is captured here."""
+        if not (self._is_container_child() and self._in_text_entry()):
             return False
-        parent = self.parent
-        return not (parent is not None and parent.has_class("nested"))
+        if event.key == "enter":
+            self.post_message(self.NestedEnter())
+            return True
+        if event.key == "backspace" and self.cursor_location == (0, 0):
+            self.post_message(self.NestedBackspace())
+            return True
+        return False
 
     async def _on_key(self, event: events.Key) -> None:
         if self._slash_triggers(event):
             event.prevent_default()
             event.stop()
             self.post_message(self.SlashRequested())
+            return
+        if self._nested_structural_key(event):
+            event.prevent_default()
+            event.stop()
             return
         if not self._vim_enabled:
             await super()._on_key(event)

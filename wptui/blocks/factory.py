@@ -39,7 +39,7 @@ def new_heading_block(level: int = 2) -> Block:
     )
 
 
-def _new_list_item(body: str = "") -> Block:
+def new_list_item(body: str = "") -> Block:
     """A single ``core/list-item`` child (matches WordPress's ``\\n<li>…</li>\\n`` shape)."""
     return _leaf_block("core/list-item", f"\n<li>{body}</li>\n")
 
@@ -68,7 +68,7 @@ def new_list_block(ordered: bool = False) -> Block:
     tag = "ol" if ordered else "ul"
     attributes = {"ordered": True} if ordered else {}
     return _container_block(
-        "core/list", f'\n<{tag} class="wp-block-list">', f"</{tag}>\n", _new_list_item(), attributes
+        "core/list", f'\n<{tag} class="wp-block-list">', f"</{tag}>\n", new_list_item(), attributes
     )
 
 

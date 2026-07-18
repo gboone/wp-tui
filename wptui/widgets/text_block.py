@@ -15,12 +15,7 @@ from textual.widgets import Static
 
 from wptui.blocks.model import Block
 from wptui.blocks.text import get_editable_body, set_editable_body
-from wptui.inline import (
-    document_to_html,
-    document_to_markdown,
-    html_to_document,
-    markdown_to_document,
-)
+from wptui.inline import html_to_markdown, markdown_to_html
 from wptui.widgets.inline_area import InlineMarkdownArea
 
 
@@ -32,7 +27,7 @@ class TextBlockEditor(Vertical):
         self.block = block
         html_body = get_editable_body(block) or ""
         # Display the block as markdown-style markers; keep the seed to detect edits.
-        self._markdown = document_to_markdown(html_to_document(html_body))
+        self._markdown = html_to_markdown(html_body)
 
     def compose(self) -> ComposeResult:
         name = (self.block.block_name or "").removeprefix("core/")
@@ -44,6 +39,6 @@ class TextBlockEditor(Vertical):
         area = self.query_one("#body", InlineMarkdownArea)
         new_markdown = area.text
         if new_markdown != self._markdown:
-            new_html = document_to_html(markdown_to_document(new_markdown))
+            new_html = markdown_to_html(new_markdown)
             set_editable_body(self.block, new_html)
             self._markdown = new_markdown

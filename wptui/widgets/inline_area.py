@@ -112,11 +112,16 @@ class InlineMarkdownArea(TextArea):
             self.remove_class("vim")
 
     def _slash_triggers(self, event: events.Key) -> bool:
-        """Whether ``/`` should open the block switcher: an empty block in a text-entry
-        context. In Vim NORMAL/VISUAL ``/`` is a movement key, so it is left alone there."""
+        """Whether ``/`` should open the block switcher: an empty top-level block in a
+        text-entry context. In Vim NORMAL/VISUAL ``/`` is a movement key, so it is left
+        alone there; and a nested empty child (a list-item, a quote's paragraph) types
+        ``/`` literally rather than replacing its whole container."""
         if event.character != "/" or self.text != "":
             return False
-        return not (self._vim_enabled and self._vim.mode is not Mode.INSERT)
+        if self._vim_enabled and self._vim.mode is not Mode.INSERT:
+            return False
+        parent = self.parent
+        return not (parent is not None and parent.has_class("nested"))
 
     async def _on_key(self, event: events.Key) -> None:
         if self._slash_triggers(event):

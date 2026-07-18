@@ -120,6 +120,31 @@ async def test_escape_leaves_block_unchanged():
         assert serialize(canvas.blocks) == before  # still one empty paragraph, no "/"
 
 
+EMPTY_LIST_DOC = (
+    '<!-- wp:list -->\n<ul class="wp-block-list">'
+    "<!-- wp:list-item -->\n<li></li>\n<!-- /wp:list-item -->"
+    "</ul>\n<!-- /wp:list -->"
+)
+
+
+@pytest.mark.asyncio
+async def test_slash_in_nested_list_item_is_literal_not_a_container_swap():
+    # Regression guard: "/" in an empty list-item must NOT replace the whole list.
+    app = await _open_editor(EMPTY_LIST_DOC)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app.push_screen(EditorScreen(PostSummary(1, "T", "draft", "2026-01-01T00:00:00", "http://x/1")))
+        await pilot.pause()
+        await pilot.pause()
+        canvas = await _focus_first_body(app, pilot)  # the list-item editor
+        body = canvas._editors[0].query_one("#body", InlineMarkdownArea)
+        await pilot.press("/")
+        await pilot.pause()
+        assert isinstance(app.screen, EditorScreen)  # no modal opened
+        assert "/" in body.text  # typed literally
+        assert "<!-- wp:list -->" in serialize(canvas.blocks)  # list intact
+
+
 # ------------------------------------------------------------------ vim gating (unit)
 
 

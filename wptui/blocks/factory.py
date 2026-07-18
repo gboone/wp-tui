@@ -44,36 +44,38 @@ def _new_list_item(body: str = "") -> Block:
     return _leaf_block("core/list-item", f"\n<li>{body}</li>\n")
 
 
-def new_list_block(ordered: bool = False) -> Block:
-    """An empty ``core/list`` (``<ul>``/``<ol>``) wrapping one empty ``core/list-item``.
+def _container_block(
+    block_name: str, open_chunk: str, close_chunk: str, child: Block, attributes: dict | None = None
+) -> Block:
+    """A minted, already-``dirty`` container wrapping a single child block.
 
-    Both the container and its child are minted ``dirty`` so serialization rebuilds them
-    from structure rather than re-emitting an (empty) captured source span.
+    ``inner_content`` interleaves the wrapper chunks with a ``None`` placeholder marking
+    where the child block is spliced back in on serialization. Both container and child
+    are ``dirty`` so serialization rebuilds them from structure.
     """
-    tag = "ol" if ordered else "ul"
-    attributes = {"ordered": True} if ordered else {}
-    open_chunk = f'\n<{tag} class="wp-block-list">'
-    close_chunk = f"</{tag}>\n"
     return Block(
-        block_name="core/list",
-        attributes=attributes,
-        inner_blocks=[_new_list_item()],
+        block_name=block_name,
+        attributes=attributes or {},
+        inner_blocks=[child],
         inner_html=f"{open_chunk}{close_chunk}",
         inner_content=[open_chunk, None, close_chunk],
         dirty=True,
     )
 
 
+def new_list_block(ordered: bool = False) -> Block:
+    """An empty ``core/list`` (``<ul>``/``<ol>``) wrapping one empty ``core/list-item``."""
+    tag = "ol" if ordered else "ul"
+    attributes = {"ordered": True} if ordered else {}
+    return _container_block(
+        "core/list", f'\n<{tag} class="wp-block-list">', f"</{tag}>\n", _new_list_item(), attributes
+    )
+
+
 def new_quote_block() -> Block:
     """An empty ``core/quote`` wrapping one empty ``core/paragraph`` (WordPress's shape)."""
-    open_chunk = '\n<blockquote class="wp-block-quote">'
-    close_chunk = "</blockquote>\n"
-    return Block(
-        block_name="core/quote",
-        inner_blocks=[new_paragraph_block()],
-        inner_html=f"{open_chunk}{close_chunk}",
-        inner_content=[open_chunk, None, close_chunk],
-        dirty=True,
+    return _container_block(
+        "core/quote", '\n<blockquote class="wp-block-quote">', "</blockquote>\n", new_paragraph_block()
     )
 
 

@@ -32,6 +32,13 @@ def test_no_match_returns_empty():
     assert match("nonsense-xyz") == []
 
 
+def test_alias_matching_is_prefix_not_substring():
+    # Aliases match by prefix so a short query can't hit mid-word: "der" must not match
+    # inside "ordered list", and "ule" must not match inside "horizontal rule".
+    assert match("der") == []
+    assert match("ule") == []
+
+
 def test_every_factory_produces_an_editable_block():
     for entry in REGISTRY:
         assert entry.factory().block_name in EDITABLE_BLOCKS

@@ -178,7 +178,15 @@ class EditorScreen(Screen[None]):
     def _convert_block(self, target, block_type) -> None:
         if block_type is None or self._canvas is None:
             return
-        self.run_worker(self._canvas.replace_block(target, block_type.factory()))
+        self.run_worker(self._do_convert(target, block_type))
+
+    async def _do_convert(self, target, block_type) -> None:
+        canvas = self._canvas
+        if canvas is None:
+            return
+        if not await canvas.replace_block(target, block_type.factory()):
+            # The captured block is gone (e.g. deleted before the picker closed).
+            self._set_status("Couldn't switch block — it's no longer here.", error=True)
 
     def on_inline_markdown_area_vim_command(self, message) -> None:
         """Handle ``:w`` / ``:q`` from a Vim command line."""

@@ -121,3 +121,10 @@ def test_list_and_quote_expose_one_editable_child():
     for container in (new_list_block(), new_quote_block()):
         assert len(container.inner_blocks) == 1
         assert get_editable_body(container.inner_blocks[0]) == ""
+
+
+def test_code_block_editable_body_is_the_code_wrapper():
+    # Documented quirk: core/code nests <code> inside <pre>, and the wrapper split keys
+    # off the outer <pre>, so a fresh code block's editable body is "<code></code>",
+    # not "". This matches how existing code blocks loaded from WordPress behave.
+    assert get_editable_body(new_code_block()) == "<code></code>"

@@ -22,13 +22,17 @@ class Harness(App):
         self.push_screen(BlockSwitcherModal(), lambda r: setattr(self, "result", r))
 
 
+def _rendered_labels(options: OptionList) -> list[str]:
+    return [str(options.get_option_at_index(i).prompt) for i in range(options.option_count)]
+
+
 @pytest.mark.asyncio
 async def test_mount_seeds_full_registry_in_order():
     app = Harness()
     async with app.run_test() as pilot:
         await pilot.pause()
         options = app.screen.query_one("#switch-list", OptionList)
-        assert options.option_count == len(REGISTRY)
+        assert _rendered_labels(options) == [bt.label for bt in REGISTRY]
 
 
 @pytest.mark.asyncio
@@ -90,4 +94,4 @@ async def test_empty_search_restores_full_list():
         search.value = ""
         await pilot.pause()
         options = app.screen.query_one("#switch-list", OptionList)
-        assert options.option_count == len(REGISTRY)
+        assert _rendered_labels(options) == [bt.label for bt in REGISTRY]

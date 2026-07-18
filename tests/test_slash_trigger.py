@@ -125,6 +125,30 @@ EMPTY_LIST_DOC = (
     "<!-- wp:list-item -->\n<li></li>\n<!-- /wp:list-item -->"
     "</ul>\n<!-- /wp:list -->"
 )
+EMPTY_QUOTE_DOC = (
+    '<!-- wp:quote -->\n<blockquote class="wp-block-quote">'
+    "<!-- wp:paragraph -->\n<p></p>\n<!-- /wp:paragraph -->"
+    "</blockquote>\n<!-- /wp:quote -->"
+)
+
+
+@pytest.mark.asyncio
+async def test_slash_in_nested_quote_paragraph_is_literal():
+    # A quote's child is a core/paragraph — same block_name as a top-level paragraph — so
+    # this is the case most likely to slip past a guard keyed on type instead of ancestry.
+    app = await _open_editor(EMPTY_QUOTE_DOC)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app.push_screen(EditorScreen(PostSummary(1, "T", "draft", "2026-01-01T00:00:00", "http://x/1")))
+        await pilot.pause()
+        await pilot.pause()
+        canvas = await _focus_first_body(app, pilot)  # the quote's paragraph editor
+        body = canvas._editors[0].query_one("#body", InlineMarkdownArea)
+        await pilot.press("/")
+        await pilot.pause()
+        assert isinstance(app.screen, EditorScreen)  # no modal
+        assert "/" in body.text  # typed literally
+        assert "<!-- wp:quote -->" in serialize(canvas.blocks)  # quote intact
 
 
 @pytest.mark.asyncio
@@ -167,6 +191,9 @@ async def test_slash_gating_respects_vim_mode():
         app.vim_mode = True
         area._vim.mode = Mode.NORMAL
         assert area._slash_triggers(slash) is False  # NORMAL "/" is a vim movement
+
+        area._vim.mode = Mode.VISUAL
+        assert area._slash_triggers(slash) is False  # VISUAL "/" is a vim movement too
 
         area._vim.mode = Mode.INSERT
         assert area._slash_triggers(slash) is True  # INSERT on empty block triggers

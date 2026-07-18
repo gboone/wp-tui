@@ -75,6 +75,8 @@ class BlockCanvas(VerticalScroll):
     def _track(self, widget: Widget, owner: Block, depth: int) -> Widget:
         self._owner[widget] = owner
         if depth:
+            # Also a semantic signal, not only styling: InlineMarkdownArea._slash_triggers
+            # reads this class to keep the "/" switcher from firing inside a nested child.
             widget.add_class("nested")
         return widget
 
@@ -93,12 +95,27 @@ class BlockCanvas(VerticalScroll):
 
     # -- structural operations (top-level blocks) -------------------------
 
+    def _index_of(self, block: Block) -> int | None:
+        """Identity-based index of ``block`` in ``self.blocks``.
+
+        ``list.index``/``in`` compare by value, and ``Block`` is a plain dataclass — so
+        two structurally-identical blocks (e.g. two empty paragraphs) are equal and
+        ``.index`` would return the *first* twin, not the one the user focused. Every
+        structural op must locate its target by identity.
+        """
+        for i, b in enumerate(self.blocks):
+            if b is block:
+                return i
+        return None
+
     async def move_focused(self, delta: int) -> bool:
         """Move the focused top-level block up (-1) or down (+1). Returns success."""
         block = self._focused_owner()
         if block is None:
             return False
-        index = self.blocks.index(block)
+        index = self._index_of(block)
+        if index is None:
+            return False
         target = self._neighbor_content_index(index, delta)
         if target is None:
             return False
@@ -113,7 +130,9 @@ class BlockCanvas(VerticalScroll):
         if block is None:
             return False
         self.sync()
-        index = self.blocks.index(block)
+        index = self._index_of(block)
+        if index is None:
+            return False
         # Focus a surviving neighbour after removal.
         neighbor_i = self._neighbor_content_index(index, +1) or self._neighbor_content_index(
             index, -1
@@ -146,10 +165,11 @@ class BlockCanvas(VerticalScroll):
         opening the picker modal (focus moves to the modal), then converts that exact
         block on selection. No separator is added — this is a positional swap.
         """
-        if old not in self.blocks:
-            return False
         self.sync()
-        self.blocks[self.blocks.index(old)] = new_block
+        index = self._index_of(old)
+        if index is None:
+            return False
+        self.blocks[index] = new_block
         await self._rerender(focus=new_block)
         return True
 
@@ -157,11 +177,11 @@ class BlockCanvas(VerticalScroll):
         """Insert an arbitrary new top-level block after the focused one (or at the end)."""
         block = self._focused_owner()
         self.sync()
-        if block is None:
+        index = None if block is None else self._index_of(block)
+        if index is None:
             self.blocks.append(separator_freeform())
             self.blocks.append(new_block)
         else:
-            index = self.blocks.index(block)
             self.blocks[index + 1 : index + 1] = [separator_freeform(), new_block]
         await self._rerender(focus=new_block)
         return True

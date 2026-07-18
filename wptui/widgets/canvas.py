@@ -128,18 +128,28 @@ class BlockCanvas(VerticalScroll):
         """Insert a new empty paragraph after the focused top-level block."""
         return await self.insert_block(new_paragraph_block())
 
-    async def replace_focused(self, new_block: Block) -> bool:
-        """Replace the focused top-level block with ``new_block`` at the same position.
+    def focused_block(self) -> Block | None:
+        """The top-level block owning the currently focused widget, or ``None``."""
+        return self._focused_owner()
 
-        Used by the slash-command block switcher to convert an empty block to another
-        type. No separator is added — this is a positional swap, not an insertion.
-        """
+    async def replace_focused(self, new_block: Block) -> bool:
+        """Replace the focused top-level block with ``new_block`` at the same position."""
         block = self._focused_owner()
         if block is None:
             return False
+        return await self.replace_block(block, new_block)
+
+    async def replace_block(self, old: Block, new_block: Block) -> bool:
+        """Replace a specific top-level block with ``new_block`` at the same position.
+
+        Used by the slash-command switcher, which captures the target block *before*
+        opening the picker modal (focus moves to the modal), then converts that exact
+        block on selection. No separator is added — this is a positional swap.
+        """
+        if old not in self.blocks:
+            return False
         self.sync()
-        index = self.blocks.index(block)
-        self.blocks[index] = new_block
+        self.blocks[self.blocks.index(old)] = new_block
         await self._rerender(focus=new_block)
         return True
 

@@ -84,6 +84,9 @@ class InlineMarkdownArea(TextArea):
             self.name = name
             super().__init__()
 
+    class SlashRequested(Message):
+        """Bubbled when the user types ``/`` on an empty block, to open the block switcher."""
+
     def __init__(self, text: str, **kwargs) -> None:
         super().__init__(text, **kwargs)
         self.register_theme(_inline_theme())
@@ -108,7 +111,19 @@ class InlineMarkdownArea(TextArea):
             self.border_title = ""
             self.remove_class("vim")
 
+    def _slash_triggers(self, event: events.Key) -> bool:
+        """Whether ``/`` should open the block switcher: an empty block in a text-entry
+        context. In Vim NORMAL/VISUAL ``/`` is a movement key, so it is left alone there."""
+        if event.character != "/" or self.text != "":
+            return False
+        return not (self._vim_enabled and self._vim.mode is not Mode.INSERT)
+
     async def _on_key(self, event: events.Key) -> None:
+        if self._slash_triggers(event):
+            event.prevent_default()
+            event.stop()
+            self.post_message(self.SlashRequested())
+            return
         if not self._vim_enabled:
             await super()._on_key(event)
             return

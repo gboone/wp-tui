@@ -162,6 +162,24 @@ class EditorScreen(Screen[None]):
 
         self.run_worker(self._canvas.insert_block(new_image_block(media)))
 
+    def on_inline_markdown_area_slash_requested(self, message) -> None:
+        """Open the block-type switcher for the focused empty block."""
+        if self._canvas is None:
+            return
+        # Capture the target now, while it is still focused — pushing the modal moves
+        # focus away, so we cannot rely on the focus at selection time.
+        target = self._canvas.focused_block()
+        if target is None:
+            return
+        from wptui.widgets.block_switcher import BlockSwitcherModal
+
+        self.app.push_screen(BlockSwitcherModal(), lambda bt: self._convert_block(target, bt))
+
+    def _convert_block(self, target, block_type) -> None:
+        if block_type is None or self._canvas is None:
+            return
+        self.run_worker(self._canvas.replace_block(target, block_type.factory()))
+
     def on_inline_markdown_area_vim_command(self, message) -> None:
         """Handle ``:w`` / ``:q`` from a Vim command line."""
         if message.name == "save":

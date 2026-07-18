@@ -95,6 +95,12 @@ class InlineMarkdownArea(TextArea):
         """Backspace at the start of a container child — the editor re-reads live state to
         remove (empty) or merge (non-empty)."""
 
+    class IndentRequested(Message):
+        """Tab in a list-item — indent it into a sublist under the previous sibling."""
+
+    class OutdentRequested(Message):
+        """Shift+Tab in a list-item — outdent it to the enclosing list."""
+
     def __init__(self, text: str, **kwargs) -> None:
         super().__init__(text, **kwargs)
         self.register_theme(_inline_theme())
@@ -130,10 +136,15 @@ class InlineMarkdownArea(TextArea):
         return parent is not None and parent.has_class("nested")
 
     def _is_container_child(self) -> bool:
-        """Whether this editor is a *direct* child of a top-level container (``container-child``
-        class, depth == 1) — the only depth Enter/Backspace edit structurally."""
+        """Whether this editor is a container child (``container-child`` class, any depth) —
+        the editors Enter/Backspace edit structurally."""
         parent = self.parent
         return parent is not None and parent.has_class("container-child")
+
+    def _is_list_item(self) -> bool:
+        """Whether this editor is a list-item (``list-item`` class) — Tab/Shift+Tab indent."""
+        parent = self.parent
+        return parent is not None and parent.has_class("list-item")
 
     def _slash_triggers(self, event: events.Key) -> bool:
         """Whether ``/`` should open the block switcher: an empty top-level block in a
@@ -145,17 +156,25 @@ class InlineMarkdownArea(TextArea):
         return self._in_text_entry() and not self._is_nested_child()
 
     def _nested_structural_key(self, event: events.Key) -> bool:
-        """Post a structural signal for Enter / Backspace-at-start when a direct container
-        child is focused. Returns whether the key was consumed. The editor (canvas) reads
-        live text/caret when it handles the signal, so nothing is captured here."""
-        if not (self._is_container_child() and self._in_text_entry()):
+        """Post a structural signal for Enter / Backspace-at-start / Tab / Shift+Tab in a
+        container child. Returns whether the key was consumed. The canvas reads live
+        text/caret when it handles the signal, so nothing is captured here."""
+        if not self._in_text_entry():
             return False
-        if event.key == "enter":
-            self.post_message(self.NestedEnter())
-            return True
-        if event.key == "backspace" and self.cursor_location == (0, 0):
-            self.post_message(self.NestedBackspace())
-            return True
+        if self._is_list_item():  # Tab indent is list-only (not quote paragraphs)
+            if event.key == "tab":
+                self.post_message(self.IndentRequested())
+                return True
+            if event.key in ("shift+tab", "backtab"):
+                self.post_message(self.OutdentRequested())
+                return True
+        if self._is_container_child():
+            if event.key == "enter":
+                self.post_message(self.NestedEnter())
+                return True
+            if event.key == "backspace" and self.cursor_location == (0, 0):
+                self.post_message(self.NestedBackspace())
+                return True
         return False
 
     async def _on_key(self, event: events.Key) -> None:

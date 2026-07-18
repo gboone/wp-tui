@@ -14,8 +14,12 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from wptui.blocks.factory import new_list_item, new_paragraph_block
+from wptui.blocks.factory import new_list_block, new_list_item, new_paragraph_block
 from wptui.blocks.model import Block
+from wptui.blocks.text import split_wrapper
+
+# Maximum list nesting depth (a top-level list is depth 1); Tab past this is a no-op.
+MAX_LIST_NEST_DEPTH = 4
 
 
 def child_factory_for(container: Block) -> Callable[[], Block]:
@@ -53,3 +57,86 @@ def set_container_children(container: Block, children: list[Block]) -> None:
     container.inner_content = [open_chunk, *([None] * len(children)), close_chunk]
     container.inner_html = f"{open_chunk}{close_chunk}"
     container.dirty = True
+
+
+# -- list nesting (Tab / Shift+Tab) -----------------------------------------
+
+
+def _identity_index(items: list[Block], target: Block) -> int | None:
+    for i, block in enumerate(items):
+        if block is target:
+            return i
+    return None
+
+
+def _sublist_of(item: Block) -> Block | None:
+    """The nested ``core/list`` held by a list-item, or ``None``."""
+    for child in item.inner_blocks:
+        if child.block_name == "core/list":
+            return child
+    return None
+
+
+def list_depth(chain: list[Block]) -> int:
+    """Nesting depth = number of ``core/list`` ancestors in the item's ancestry chain."""
+    return sum(1 for block in chain if block.block_name == "core/list")
+
+
+def _attach_sublist_to_leaf(item: Block, sublist: Block) -> None:
+    """Turn a leaf list-item into a parent holding ``sublist`` after its text."""
+    wrapped = split_wrapper(item.inner_html)
+    prefix, body, suffix = (wrapped.prefix, wrapped.body, wrapped.suffix) if wrapped else ("<li>", "", "</li>")
+    item.inner_blocks = [sublist]
+    item.inner_content = [f"{prefix}{body}", None, suffix]
+    item.inner_html = f"{prefix}{body}{suffix}"
+    item.dirty = True
+
+
+def _detach_sublist_from_leaf(item: Block) -> None:
+    """Turn a parent list-item back into a leaf (its sublist has been emptied/removed)."""
+    inner = "".join(chunk for chunk in item.inner_content if chunk is not None)
+    item.inner_blocks = []
+    item.inner_content = [inner]
+    item.inner_html = inner
+    item.dirty = True
+
+
+def indent_item(enclosing_list: Block, item: Block) -> bool:
+    """Indent ``item`` into a sublist under its previous sibling. No-op on the first item.
+
+    The moved item keeps its own sublist (moves as a unit). The sublist inherits the
+    enclosing list's ordered/unordered kind."""
+    items = enclosing_list.inner_blocks
+    idx = _identity_index(items, item)
+    if idx is None or idx == 0:
+        return False
+    previous = items[idx - 1]
+    sublist = _sublist_of(previous)
+    if sublist is None:
+        sublist = new_list_block(ordered=bool(enclosing_list.attributes.get("ordered")))
+        set_container_children(sublist, [item])
+        _attach_sublist_to_leaf(previous, sublist)
+    else:
+        set_container_children(sublist, [*sublist.inner_blocks, item])
+    set_container_children(enclosing_list, [b for b in items if b is not item])
+    return True
+
+
+def outdent_item(chain: list[Block], item: Block) -> bool:
+    """Outdent ``item`` to the enclosing list, after the item that held its sublist. No-op
+    at the top level. ``chain`` is the ancestry ``[…, enclosing_list, parent_item, sublist]``."""
+    if len(chain) < 3:
+        return False
+    sublist, parent_item, enclosing_list = chain[-1], chain[-2], chain[-3]
+    remaining = [b for b in sublist.inner_blocks if b is not item]
+    if remaining:
+        set_container_children(sublist, remaining)
+    else:
+        _detach_sublist_from_leaf(parent_item)
+    items = list(enclosing_list.inner_blocks)
+    pidx = _identity_index(items, parent_item)
+    if pidx is None:
+        return False
+    items.insert(pidx + 1, item)
+    set_container_children(enclosing_list, items)
+    return True

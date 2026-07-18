@@ -15,7 +15,14 @@ from textual.css.query import NoMatches
 from textual.widget import Widget
 from textual.widgets import Static
 
-from wptui.blocks.containers import child_factory_for, set_container_children
+from wptui.blocks.containers import (
+    MAX_LIST_NEST_DEPTH,
+    child_factory_for,
+    indent_item,
+    list_depth,
+    outdent_item,
+    set_container_children,
+)
 from wptui.blocks.factory import new_paragraph_block, separator_freeform, set_heading_level
 from wptui.blocks.model import Block
 from wptui.blocks.serialize import propagate_dirty
@@ -61,7 +68,9 @@ class BlockCanvas(VerticalScroll):
             # always a structural child of its list, at any depth.
             widget = TextBlockEditor(block)
             self._editors.append(widget)
-            yield self._track(widget, owner, depth, structural=True)
+            tracked = self._track(widget, owner, depth, structural=True)
+            tracked.add_class("list-item")  # Tab/Shift+Tab indent applies only to list-items
+            yield tracked
             for child in block.inner_blocks:
                 yield from self._render_block(child, owner=owner, depth=depth + 1, structural=True)
             return
@@ -227,6 +236,32 @@ class BlockCanvas(VerticalScroll):
         if not before and not after:
             return await self.exit_container()
         return await self.split_child(before, after)
+
+    async def indent_focused(self) -> bool:
+        """Tab: indent the focused list-item into a sublist under its previous sibling."""
+        found = self._focused_child()
+        if found is None or found[0].block_name != "core/list":
+            return False
+        enclosing_list, item = found
+        self.sync()
+        if list_depth(self._ancestry(item)) >= MAX_LIST_NEST_DEPTH:
+            return False
+        if not indent_item(enclosing_list, item):
+            return False
+        await self._rerender(focus=item, caret="end")
+        return True
+
+    async def outdent_focused(self) -> bool:
+        """Shift+Tab: outdent the focused list-item to the enclosing list."""
+        found = self._focused_child()
+        if found is None or found[0].block_name != "core/list":
+            return False
+        item = found[1]
+        self.sync()
+        if not outdent_item(self._ancestry(item), item):
+            return False
+        await self._rerender(focus=item, caret="end")
+        return True
 
     async def nested_backspace(self) -> bool:
         """Handle Backspace at the start of a container child: remove it when empty, else

@@ -88,23 +88,12 @@ class InlineMarkdownArea(TextArea):
         """Bubbled when the user types ``/`` on an empty block, to open the block switcher."""
 
     class NestedEnter(Message):
-        """Enter pressed in a nested container child: text split at the caret.
-
-        Both halves empty means the child is empty (exit the container); otherwise the
-        container splits into two children at the caret."""
-
-        def __init__(self, before: str, after: str) -> None:
-            self.before = before
-            self.after = after
-            super().__init__()
+        """Enter pressed in a container child — the editor re-reads live text/caret to
+        split (or exit when empty), so the signal carries no (stale) payload."""
 
     class NestedBackspace(Message):
-        """Backspace at the start of a nested container child (``empty`` → remove it,
-        otherwise merge it into the previous child)."""
-
-        def __init__(self, empty: bool) -> None:
-            self.empty = empty
-            super().__init__()
+        """Backspace at the start of a container child — the editor re-reads live state to
+        remove (empty) or merge (non-empty)."""
 
     def __init__(self, text: str, **kwargs) -> None:
         super().__init__(text, **kwargs)
@@ -135,11 +124,16 @@ class InlineMarkdownArea(TextArea):
         return not (self._vim_enabled and self._vim.mode is not Mode.INSERT)
 
     def _is_nested_child(self) -> bool:
-        """Whether this editor renders a nested container child (list-item / quote para).
-
-        Reads the ``nested`` class the canvas stamps on child editors at depth > 0."""
+        """Whether this editor renders any nested child (``nested`` class, depth > 0) —
+        used to keep the ``/`` switcher from firing inside a container."""
         parent = self.parent
         return parent is not None and parent.has_class("nested")
+
+    def _is_container_child(self) -> bool:
+        """Whether this editor is a *direct* child of a top-level container (``container-child``
+        class, depth == 1) — the only depth Enter/Backspace edit structurally."""
+        parent = self.parent
+        return parent is not None and parent.has_class("container-child")
 
     def _slash_triggers(self, event: events.Key) -> bool:
         """Whether ``/`` should open the block switcher: an empty top-level block in a
@@ -151,17 +145,16 @@ class InlineMarkdownArea(TextArea):
         return self._in_text_entry() and not self._is_nested_child()
 
     def _nested_structural_key(self, event: events.Key) -> bool:
-        """Handle Enter/Backspace structurally when a nested child is focused. Returns
-        whether the key was consumed (a structural message was posted)."""
-        if not (self._is_nested_child() and self._in_text_entry()):
+        """Post a structural signal for Enter / Backspace-at-start when a direct container
+        child is focused. Returns whether the key was consumed. The editor (canvas) reads
+        live text/caret when it handles the signal, so nothing is captured here."""
+        if not (self._is_container_child() and self._in_text_entry()):
             return False
         if event.key == "enter":
-            before = self.get_text_range((0, 0), self.cursor_location)
-            after = self.get_text_range(self.cursor_location, self.document.end)
-            self.post_message(self.NestedEnter(before, after))
+            self.post_message(self.NestedEnter())
             return True
         if event.key == "backspace" and self.cursor_location == (0, 0):
-            self.post_message(self.NestedBackspace(empty=self.text == ""))
+            self.post_message(self.NestedBackspace())
             return True
         return False
 

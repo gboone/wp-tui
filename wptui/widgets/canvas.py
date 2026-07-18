@@ -20,12 +20,7 @@ from wptui.blocks.factory import new_paragraph_block, separator_freeform
 from wptui.blocks.model import Block
 from wptui.blocks.serialize import propagate_dirty
 from wptui.blocks.text import get_editable_body, set_editable_body
-from wptui.inline import (
-    document_to_html,
-    document_to_markdown,
-    html_to_document,
-    markdown_to_document,
-)
+from wptui.inline import html_to_markdown, markdown_to_html
 from wptui.widgets.image_card import ImageCard
 from wptui.widgets.inline_area import InlineMarkdownArea
 from wptui.widgets.opaque_card import OpaqueCard
@@ -83,9 +78,14 @@ class BlockCanvas(VerticalScroll):
     def _track(self, widget: Widget, owner: Block, depth: int) -> Widget:
         self._owner[widget] = owner
         if depth:
-            # Also a semantic signal, not only styling: InlineMarkdownArea._slash_triggers
-            # reads this class to keep the "/" switcher from firing inside a nested child.
+            # Semantic signal, not only styling: InlineMarkdownArea._slash_triggers reads
+            # "nested" (any depth) to keep the "/" switcher from firing inside a child.
             widget.add_class("nested")
+        if depth == 1:
+            # A direct child of a top-level container (a list-item, a quote paragraph) —
+            # the only depth Enter/Backspace structural editing operates on. Deeper nesting
+            # (a list inside a quote) is left to default key handling.
+            widget.add_class("container-child")
         return widget
 
     # -- committing / saving ----------------------------------------------
@@ -193,21 +193,40 @@ class BlockCanvas(VerticalScroll):
 
     # -- nested child (list-item / quote paragraph) structural ops --------
 
+    async def nested_enter(self) -> bool:
+        """Handle Enter in a container child: read the *live* editor's text and caret, then
+        split (or exit when the child is empty). Reading at handle time — not from the key
+        event — keeps queued Enters correct: a second Enter sees the freshly-focused new
+        child, so Enter-Enter is "new item, then exit", never a stale re-split."""
+        area = self._focused_inline_area()
+        if area is None:
+            return False
+        offset = _location_to_offset(area.text, area.cursor_location)
+        before, after = area.text[:offset], area.text[offset:]
+        if not before and not after:
+            return await self.exit_container()
+        return await self.split_child(before, after)
+
+    async def nested_backspace(self) -> bool:
+        """Handle Backspace at the start of a container child: remove it when empty, else
+        merge it into the previous child. Reads the live editor to stay queue-safe."""
+        area = self._focused_inline_area()
+        if area is None:
+            return False
+        if area.text == "":
+            return await self.remove_child()
+        return await self.merge_child_into_previous()
+
     async def split_child(self, before_md: str, after_md: str) -> bool:
         """Split the focused container child at the caret: ``before_md`` stays, ``after_md``
         moves to a new sibling inserted below; caret at the start of the new child."""
-        found = self._focused_child()
-        if found is None:
+        located = self._locate_focused_child()
+        if located is None:
             return False
-        container, child = found
-        self.sync()
-        set_editable_body(child, _md_to_html(before_md))
+        container, child, children, idx = located
+        set_editable_body(child, markdown_to_html(before_md))
         new_child = child_factory_for(container)()
-        set_editable_body(new_child, _md_to_html(after_md))
-        children = list(container.inner_blocks)
-        idx = _identity_index(children, child)
-        if idx is None:
-            return False
+        set_editable_body(new_child, markdown_to_html(after_md))
         children.insert(idx + 1, new_child)
         set_container_children(container, children)
         await self._rerender(focus=new_child, caret="start")
@@ -236,20 +255,24 @@ class BlockCanvas(VerticalScroll):
 
     async def merge_child_into_previous(self) -> bool:
         """Merge the focused child's text into the previous sibling; caret at the join.
-        No-op at the first child (no previous sibling)."""
-        found = self._focused_child()
-        if found is None:
+        No-op at the first child, or when the previous sibling is not an editable
+        single-wrapper block (e.g. a nested list) — merging into it would destroy it."""
+        located = self._locate_focused_child()
+        if located is None:
             return False
-        container, child = found
-        self.sync()
-        children = list(container.inner_blocks)
-        idx = _identity_index(children, child)
-        if idx is None or idx == 0:
+        container, child, children, idx = located
+        if idx == 0:
             return False
         previous = children[idx - 1]
-        prev_md = _html_to_md(get_editable_body(previous) or "")
-        child_md = _html_to_md(get_editable_body(child) or "")
-        set_editable_body(previous, _md_to_html(prev_md + child_md))
+        prev_body = get_editable_body(previous)
+        if previous.inner_blocks or prev_body is None:
+            # A container (e.g. a nested list) or a non-single-wrapper block — merging text
+            # into it would wipe its children or drop this child's text. Leave it be.
+            return False
+        prev_md = html_to_markdown(prev_body)
+        child_md = html_to_markdown(get_editable_body(child) or "")
+        if not set_editable_body(previous, markdown_to_html(prev_md + child_md)):
+            return False
         children.pop(idx)
         set_container_children(container, children)
         await self._rerender(focus=previous, caret=len(prev_md))
@@ -257,32 +280,31 @@ class BlockCanvas(VerticalScroll):
 
     async def remove_child(self) -> bool:
         """Remove the focused (empty) child; focus the previous sibling's end. When it was
-        the only child, remove the container and focus the nearest neighbour."""
-        found = self._focused_child()
-        if found is None:
+        the only child, remove the container and focus a neighbour — or, if the container
+        was the whole document, replace it with an empty paragraph so the caret has a home."""
+        located = self._locate_focused_child()
+        if located is None:
             return False
-        container, child = found
-        self.sync()
-        children = list(container.inner_blocks)
-        idx = _identity_index(children, child)
-        if idx is None:
-            return False
+        container, child, children, idx = located
         remaining = [c for c in children if c is not child]
         if remaining:
             set_container_children(container, remaining)
             focus_target = children[idx - 1] if idx > 0 else remaining[0]
             await self._rerender(focus=focus_target, caret="end")
-        else:
-            cidx = self._index_of(container)
-            neighbor = None
-            if cidx is not None:
-                neighbor_i = self._neighbor_content_index(cidx, +1) or self._neighbor_content_index(
-                    cidx, -1
-                )
-                neighbor = self.blocks[neighbor_i] if neighbor_i is not None else None
-                self.blocks.pop(cidx)
-                self._drop_adjacent_blank(cidx)
-            await self._rerender(focus=neighbor)
+            return True
+        cidx = self._index_of(container)
+        if cidx is None:
+            return False
+        neighbor_i = self._neighbor_content_index(cidx, +1) or self._neighbor_content_index(cidx, -1)
+        if neighbor_i is not None:
+            neighbor = self.blocks[neighbor_i]
+            self.blocks.pop(cidx)
+            self._drop_adjacent_blank(cidx)
+            await self._rerender(focus=neighbor, caret="end")
+        else:  # the container was the only block — never leave an empty, unfocusable doc
+            paragraph = new_paragraph_block()
+            self.blocks[cidx] = paragraph
+            await self._rerender(focus=paragraph, caret="start")
         return True
 
     # -- helpers ----------------------------------------------------------
@@ -304,6 +326,10 @@ class BlockCanvas(VerticalScroll):
             node = node.parent if isinstance(node.parent, Widget) else None
         return None
 
+    def _focused_inline_area(self) -> InlineMarkdownArea | None:
+        focused = self.screen.focused
+        return focused if isinstance(focused, InlineMarkdownArea) else None
+
     def _focused_child(self) -> tuple[Block, Block] | None:
         """``(container, child)`` when a nested container child is focused, else ``None``.
 
@@ -317,6 +343,22 @@ class BlockCanvas(VerticalScroll):
         if container is None or container is child:
             return None
         return container, child
+
+    def _locate_focused_child(self) -> tuple[Block, Block, list[Block], int] | None:
+        """``(container, child, children, idx)`` for the focused child, after ``sync()``.
+
+        Shared preamble for the split/merge/remove ops. Locates the child by identity so a
+        structural twin (two empty items) never mis-targets."""
+        found = self._focused_child()
+        if found is None:
+            return None
+        container, child = found
+        self.sync()
+        children = list(container.inner_blocks)
+        idx = _identity_index(children, child)
+        if idx is None:
+            return None
+        return container, child, children, idx
 
     def _neighbor_content_index(self, index: int, delta: int) -> int | None:
         """Index of the nearest rendered (non-blank) block in the given direction."""
@@ -379,14 +421,6 @@ class BlockCanvas(VerticalScroll):
                 return widget
         return None
 
-def _md_to_html(markdown: str) -> str:
-    return document_to_html(markdown_to_document(markdown))
-
-
-def _html_to_md(html: str) -> str:
-    return document_to_markdown(html_to_document(html))
-
-
 def _identity_index(blocks: list[Block], target: Block) -> int | None:
     """Index by identity (list.index would match a structural twin — two empty items)."""
     for i, block in enumerate(blocks):
@@ -401,6 +435,13 @@ def _offset_to_location(text: str, offset: int) -> tuple[int, int]:
     row = before.count("\n")
     column = len(before) - (before.rfind("\n") + 1)
     return row, column
+
+
+def _location_to_offset(text: str, location: tuple[int, int]) -> int:
+    """Convert a TextArea ``(row, column)`` location to a character offset in ``text``."""
+    row, column = location
+    lines = text.split("\n")
+    return sum(len(line) + 1 for line in lines[:row]) + column
 
 
 def _classify(block: Block) -> str:

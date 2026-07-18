@@ -21,6 +21,17 @@ from wptui.inline.markup import (
 )
 from wptui.inline.model import InlineDocument, Link, Mark, Run
 
+
+def markdown_to_html(markdown: str) -> str:
+    """Convert user-facing markdown text to WordPress inner-HTML."""
+    return document_to_html(markdown_to_document(markdown))
+
+
+def html_to_markdown(html: str) -> str:
+    """Convert WordPress inner-HTML to the markdown text the editor displays."""
+    return document_to_markdown(html_to_document(html))
+
+
 __all__ = [
     "InlineDocument",
     "Link",
@@ -30,5 +41,7 @@ __all__ = [
     "document_to_html",
     "markdown_to_document",
     "document_to_markdown",
+    "markdown_to_html",
+    "html_to_markdown",
     "highlight_spans",
 ]

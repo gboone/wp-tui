@@ -198,6 +198,76 @@ async def test_quote_paragraph_enter_adds_paragraph():
 
 
 @pytest.mark.asyncio
+async def test_double_enter_adds_item_then_exits():
+    # Regression for the queued-Enter bug: two Enters at the end of an item must be
+    # "new empty bullet, then exit the list" — never a stale re-split into ["first","first"].
+    app = WPTuiApp()
+    app.client = _Client(_list_doc("first"))
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        canvas = await _push_editor(app, pilot)
+        body = canvas._editors[0].query_one("#body", InlineMarkdownArea)
+        body.focus()
+        body.move_cursor(body.document.end)
+        await pilot.pause()
+        await pilot.press("enter")
+        await _settle(pilot)
+        await pilot.press("enter")  # on the freshly-focused empty item -> exit
+        await _settle(pilot)
+        out = serialize(canvas.blocks)
+        assert _list_item_count(canvas) == 1  # "first" only; no duplicate
+        assert "<li>first</li>" in out and "<!-- wp:paragraph -->" in out
+
+
+@pytest.mark.asyncio
+async def test_enter_in_list_nested_in_a_quote_falls_through():
+    # Structural editing is scoped to direct children of a top-level container. A list
+    # nested inside a quote renders its items at depth 2, so Enter must NOT be consumed as
+    # a structural key (no dead key, no wrong restructure).
+    quote = new_quote_block()
+    set_container_children(quote, [_build_list("a", "b")])
+    app = WPTuiApp()
+    app.client = _Client(serialize([quote]))
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        canvas = await _push_editor(app, pilot)
+        body = canvas._editors[0].query_one("#body", InlineMarkdownArea)  # depth-2 list item
+        body.focus()
+        body.move_cursor(body.document.end)
+        await pilot.pause()
+        await pilot.press("enter")
+        await _settle(pilot)
+        assert _list_item_count(canvas) == 2  # unchanged — Enter did not split structurally
+
+
+def _build_list(*texts):
+    lst = new_list_block()
+    items = []
+    for t in texts:
+        item = new_list_item()
+        set_editable_body(item, t)
+        items.append(item)
+    set_container_children(lst, items)
+    return lst
+
+
+@pytest.mark.asyncio
+async def test_quote_backspace_on_empty_paragraph_removes_it():
+    app = WPTuiApp()
+    app.client = _Client(_quote_doc("keep", ""))
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        canvas = await _push_editor(app, pilot)
+        body = canvas._editors[1].query_one("#body", InlineMarkdownArea)  # empty 2nd para
+        body.focus()
+        body.move_cursor((0, 0))
+        await pilot.pause()
+        await pilot.press("backspace")
+        await _settle(pilot)
+        assert serialize(canvas.blocks).count("<!-- wp:paragraph -->") == 1
+
+
+@pytest.mark.asyncio
 async def test_vim_normal_enter_does_not_restructure_but_insert_does():
     app = WPTuiApp()
     app.client = _Client(_list_doc("first"))

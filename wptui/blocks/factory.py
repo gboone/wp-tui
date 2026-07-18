@@ -25,6 +25,97 @@ def new_paragraph_block() -> Block:
     )
 
 
+def new_heading_block(level: int = 2) -> Block:
+    """An empty ``core/heading`` at the given level. WordPress omits the ``level``
+    attribute for the default H2 and includes it otherwise."""
+    attributes = {} if level == 2 else {"level": level}
+    inner = f'\n<h{level} class="wp-block-heading"></h{level}>\n'
+    return Block(
+        block_name="core/heading",
+        attributes=attributes,
+        inner_html=inner,
+        inner_content=[inner],
+        dirty=True,
+    )
+
+
+def _new_list_item(body: str = "") -> Block:
+    """A single ``core/list-item`` child (matches WordPress's ``\\n<li>…</li>\\n`` shape)."""
+    inner = f"\n<li>{body}</li>\n"
+    return Block(
+        block_name="core/list-item",
+        inner_html=inner,
+        inner_content=[inner],
+        dirty=True,
+    )
+
+
+def new_list_block(ordered: bool = False) -> Block:
+    """An empty ``core/list`` (``<ul>``/``<ol>``) wrapping one empty ``core/list-item``.
+
+    Both the container and its child are minted ``dirty`` so serialization rebuilds them
+    from structure rather than re-emitting an (empty) captured source span.
+    """
+    tag = "ol" if ordered else "ul"
+    attributes = {"ordered": True} if ordered else {}
+    open_chunk = f'\n<{tag} class="wp-block-list">'
+    close_chunk = f"</{tag}>\n"
+    return Block(
+        block_name="core/list",
+        attributes=attributes,
+        inner_blocks=[_new_list_item()],
+        inner_html=f"{open_chunk}{close_chunk}",
+        inner_content=[open_chunk, None, close_chunk],
+        dirty=True,
+    )
+
+
+def new_quote_block() -> Block:
+    """An empty ``core/quote`` wrapping one empty ``core/paragraph`` (WordPress's shape)."""
+    open_chunk = '\n<blockquote class="wp-block-quote">'
+    close_chunk = "</blockquote>\n"
+    return Block(
+        block_name="core/quote",
+        inner_blocks=[new_paragraph_block()],
+        inner_html=f"{open_chunk}{close_chunk}",
+        inner_content=[open_chunk, None, close_chunk],
+        dirty=True,
+    )
+
+
+def new_code_block() -> Block:
+    """An empty ``core/code`` block (``<pre class="wp-block-code"><code></code></pre>``)."""
+    inner = '\n<pre class="wp-block-code"><code></code></pre>\n'
+    return Block(
+        block_name="core/code",
+        inner_html=inner,
+        inner_content=[inner],
+        dirty=True,
+    )
+
+
+def new_preformatted_block() -> Block:
+    """An empty ``core/preformatted`` block."""
+    inner = '\n<pre class="wp-block-preformatted"></pre>\n'
+    return Block(
+        block_name="core/preformatted",
+        inner_html=inner,
+        inner_content=[inner],
+        dirty=True,
+    )
+
+
+def new_separator_block() -> Block:
+    """A ``core/separator`` (horizontal rule)."""
+    inner = '\n<hr class="wp-block-separator has-alpha-channel-opacity"/>\n'
+    return Block(
+        block_name="core/separator",
+        inner_html=inner,
+        inner_content=[inner],
+        dirty=True,
+    )
+
+
 def new_image_block(media: "MediaItem", *, alt: str = "", caption: str = "") -> Block:
     """Mint a ``core/image`` block referencing an uploaded media item.
 

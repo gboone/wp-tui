@@ -283,7 +283,7 @@ class EditorScreen(Screen[None]):
         self._save()
 
     @work(group="editor-save")
-    async def _save(self) -> None:
+    async def _save(self, *, force: bool = False) -> None:
         client = self.app.client  # type: ignore[attr-defined]
         if client is None or self._canvas is None:
             return
@@ -300,9 +300,15 @@ class EditorScreen(Screen[None]):
             self._canvas.sync()
             content = serialize(self._canvas.blocks)
             title = self.query_one("#editor-title", Input).value
-            detail = await self._commit_save(client, title, content)
+            detail = await self._commit_save(client, title, content, force=force)
         except ConflictError as err:
-            self._set_status(f"Not saved: {err} Reload to get the latest.", error=True)
+            # A forced overwrite that still conflicts (another author saved again in the
+            # same instant) shouldn't loop back into the modal — report and let the user
+            # retry deliberately.
+            if force:
+                self._set_status(f"Overwrite failed: {err} Try again.", error=True)
+            else:
+                self._offer_conflict_resolution(err)
             return
         except NetworkError as err:
             # A create whose response was lost may have committed server-side; _commit_save
@@ -336,11 +342,83 @@ class EditorScreen(Screen[None]):
         self._last_saved_sig = None
         self._set_status(f"Saved · {detail.status} · modified {detail.modified_gmt}")
 
+    def _offer_conflict_resolution(self, err: ConflictError) -> None:
+        """Ask how to resolve a save conflict and act on the choice."""
+        from wptui.widgets.conflict_modal import ConflictModal
+
+        def _resolve(choice: str | None) -> None:
+            if choice == "overwrite":
+                self._save(force=True)
+            elif choice == "reload":
+                self._reload_from_server()
+            else:  # "cancel" or dismissed
+                self._set_status(
+                    "Kept your edits — not saved. Overwrite or reload from the menu "
+                    "on the next Ctrl+S.",
+                    error=True,
+                )
+
+        self.app.push_screen(ConflictModal(err.server_modified_gmt), _resolve)
+
+    @work(exclusive=True, group="editor-load")
+    async def _reload_from_server(self) -> None:
+        """Discard local edits and reload the server's current version of the post.
+
+        Destructive by design — only reached from the explicit "Reload" conflict choice.
+        Resets the baseline (``modified_gmt``, settings, undo history) so the next save
+        checks against the freshly-loaded state instead of immediately re-conflicting.
+        """
+        client = self.app.client  # type: ignore[attr-defined]
+        if client is None or self._post_id is None:
+            return
+        # Hold the save guard across the whole reload: the editor stays interactive while
+        # get_post is in flight, and a Ctrl+S in that window would re-check the still-stale
+        # timestamp and stack a phantom second conflict modal over content we're replacing.
+        self._saving = True
+        try:
+            try:
+                detail = await client.get_post(self._post_id, self._post_type)
+            except ApiError as err:
+                self._set_status(f"Reload failed: {err}", error=True)
+                return
+            if not self.is_mounted:  # screen popped while the fetch was in flight
+                return
+            self._modified_gmt = detail.modified_gmt
+            self._post_type = detail.post_type or self._post_type
+            self._settings = PostSettings.from_detail(detail)
+            self.query_one("#editor-title", Input).value = detail.title_raw
+            blocks = parse(detail.content_raw)
+            serialized = serialize(blocks)
+            canvas = BlockCanvas(blocks)
+            old = self._canvas
+            self._canvas = canvas
+            self._history = DocumentHistory(serialized)
+            if old is not None:
+                await old.remove()
+            await self.mount(canvas, before=self.query_one("#editor-status"))
+            # The local edits are gone by the user's explicit choice — drop their on-disk
+            # recovery snapshot now (matching the save path) instead of waiting for the next
+            # autosave tick, so a crash in that window can't offer to restore discarded work.
+            if self._draft_key is not None:
+                clear_snapshot(self._draft_key)
+            # Prime the signature to the reloaded content (like _load) so an untouched buffer
+            # doesn't immediately re-snapshot.
+            self._last_saved_sig = f"{detail.title_raw}\x00{serialized}"
+            self._set_status(
+                f"Reloaded server version · {len(blocks)} block(s) · "
+                "your earlier edits were discarded"
+            )
+        finally:
+            self._saving = False
+
     async def _commit_save(
-        self, client, title: str, content: str
+        self, client, title: str, content: str, *, force: bool = False
     ) -> PostDetail | None:
         """Create or update the post; return the saved detail, or None if a create was
         deferred pending user confirmation.
+
+        ``force`` skips the update's ``modified_gmt`` conflict pre-check so a deliberate
+        overwrite wins — used only after the user chose "Overwrite" on a conflict.
 
         A create whose response is lost (NetworkError) may still have committed. Rather than
         blindly re-creating on the next save — which would duplicate the post — we look for
@@ -354,7 +432,7 @@ class EditorScreen(Screen[None]):
                 content_raw=content,
                 title_raw=title,
                 settings=self._settings,
-                expected_modified_gmt=self._modified_gmt,
+                expected_modified_gmt=None if force else self._modified_gmt,
             )
 
         if self._unverified_create:

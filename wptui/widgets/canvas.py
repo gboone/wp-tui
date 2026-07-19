@@ -469,9 +469,11 @@ class BlockCanvas(VerticalScroll):
 
     async def reload(self, blocks: list[Block]) -> None:
         """Replace the whole document (used by undo/redo) and re-render, focusing the first
-        block. Callers capture the outgoing state first — reload does not sync."""
+        rendered block (a leading blank-freeform chunk has no widget to focus). Callers
+        capture the outgoing state first — reload does not sync."""
         self.blocks = blocks
-        await self._rerender(focus=blocks[0] if blocks else None)
+        focus = next((block for block in blocks if _is_content(block)), None)
+        await self._rerender(focus=focus)
 
     async def _rerender(self, *, focus: Block | None, caret: str | int | None = None) -> None:
         await self.recompose()

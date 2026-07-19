@@ -140,18 +140,22 @@ class EditorScreen(Screen[None]):
 
     async def action_move_up(self) -> None:
         if self._canvas is not None:
+            self._checkpoint()
             await self._canvas.move_focused(-1)
 
     async def action_move_down(self) -> None:
         if self._canvas is not None:
+            self._checkpoint()
             await self._canvas.move_focused(+1)
 
     async def action_insert_paragraph(self) -> None:
         if self._canvas is not None:
+            self._checkpoint()
             await self._canvas.insert_paragraph()
 
     async def action_delete_block(self) -> None:
         if self._canvas is not None:
+            self._checkpoint()
             await self._canvas.delete_focused()
 
     def action_add_image(self) -> None:
@@ -204,6 +208,7 @@ class EditorScreen(Screen[None]):
     def _apply_heading_level(self, target, level) -> None:
         if level is None or self._canvas is None:
             return
+        self._checkpoint()
         self.run_worker(self._canvas.set_heading_level_on(target, level))
 
     def _image_uploaded(self, media) -> None:
@@ -211,6 +216,7 @@ class EditorScreen(Screen[None]):
             return
         from wptui.blocks.factory import new_image_block
 
+        self._checkpoint()
         self.run_worker(self._canvas.insert_block(new_image_block(media)))
 
     def on_inline_markdown_area_slash_requested(self, message) -> None:
@@ -235,6 +241,7 @@ class EditorScreen(Screen[None]):
         canvas = self._canvas
         if canvas is None:
             return
+        self._checkpoint()
         if not await canvas.replace_block(target, block_type.factory()):
             # The captured block is gone (e.g. deleted before the picker closed).
             self._set_status("Couldn't switch block — it's no longer here.", error=True)
@@ -244,21 +251,25 @@ class EditorScreen(Screen[None]):
         processes queued Enters one at a time — each re-reads live focus, so a fast
         Enter-Enter is "new item then exit", never a stale re-split."""
         if self._canvas is not None:
+            self._checkpoint()
             await self._canvas.nested_enter()
 
     async def on_inline_markdown_area_nested_backspace(self, message) -> None:
         """Backspace at the start of a child: remove it (empty) or merge into the previous."""
         if self._canvas is not None:
+            self._checkpoint()
             await self._canvas.nested_backspace()
 
     async def on_inline_markdown_area_indent_requested(self, message) -> None:
         """Tab in a list-item: indent it under the previous sibling."""
         if self._canvas is not None:
+            self._checkpoint()
             await self._canvas.indent_focused()
 
     async def on_inline_markdown_area_outdent_requested(self, message) -> None:
         """Shift+Tab in a list-item: outdent it to the enclosing list."""
         if self._canvas is not None:
+            self._checkpoint()
             await self._canvas.outdent_focused()
 
     def on_inline_markdown_area_vim_command(self, message) -> None:
@@ -538,6 +549,7 @@ class EditorScreen(Screen[None]):
         canvas = BlockCanvas(parse(snap.get("content", "")))
         old = self._canvas
         self._canvas = canvas
+        self._history = DocumentHistory(serialize(canvas.blocks))  # baseline on the restored content
         if old is not None:
             await old.remove()
         await self.mount(canvas, before=self.query_one("#editor-status"))

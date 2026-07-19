@@ -120,6 +120,55 @@ async def test_redo_with_nothing_to_redo_is_a_noop():
 
 
 @pytest.mark.asyncio
+async def test_structural_edits_undo_one_at_a_time():
+    # Regression (F1): two structural ops with no autosave tick between must undo separately,
+    # not collapse into a single "undo ate my session" step.
+    app = WPTuiApp()
+    app.client = _Client(DOC)  # 2 paragraphs
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        screen = await _push(app, pilot)
+        canvas = screen._canvas
+        canvas._editors[0].query_one("#body").focus()
+        await pilot.pause()
+        await pilot.press("ctrl+delete")  # 2 -> 1
+        await _settle(pilot)
+        canvas._editors[0].query_one("#body").focus()
+        await pilot.pause()
+        await pilot.press("ctrl+n")  # 1 -> 2 (insert)
+        await _settle(pilot)
+        assert _para_count(canvas) == 2
+        await pilot.press("ctrl+z")  # undoes only the insert -> 1
+        await _settle(pilot)
+        assert _para_count(canvas) == 1
+        await pilot.press("ctrl+z")  # undoes the delete -> 2
+        await _settle(pilot)
+        assert _para_count(canvas) == 2
+
+
+@pytest.mark.asyncio
+async def test_reload_focuses_first_content_block_skipping_blank_freeform():
+    # Regression (F3): a document that starts with blank freeform must not leave focus dead.
+    from textual.app import App, ComposeResult
+
+    from wptui.blocks import parse
+    from wptui.widgets.inline_area import InlineMarkdownArea
+
+    class H(App):
+        def compose(self) -> ComposeResult:
+            yield BlockCanvas([])
+
+    app = H()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        canvas = app.query_one(BlockCanvas)
+        await canvas.reload(parse("\n\n" + P1))  # leading blank freeform, then a paragraph
+        for _ in range(5):
+            await pilot.pause()
+        assert isinstance(app.focused, InlineMarkdownArea)  # focus landed on the paragraph editor
+
+
+@pytest.mark.asyncio
 async def test_new_edit_after_undo_clears_redo():
     app = WPTuiApp()
     app.client = _Client(DOC)

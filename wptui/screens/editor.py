@@ -23,6 +23,7 @@ from wptui.api import (
 )
 from wptui.autosave import clear_snapshot, list_snapshots, read_snapshot, write_snapshot
 from wptui.blocks import parse, serialize
+from wptui.history import DocumentHistory
 from wptui.widgets.canvas import BlockCanvas
 
 # How often the editor snapshots the in-progress buffer to disk (crash safety).
@@ -45,6 +46,8 @@ class EditorScreen(Screen[None]):
         Binding("ctrl+n", "insert_paragraph", "New ¶", priority=True),
         Binding("ctrl+g", "add_image", "Add image", priority=True),
         Binding("f3", "heading_level", "Heading level", priority=True),
+        Binding("ctrl+z", "undo", "Undo", priority=True),
+        Binding("ctrl+y", "redo", "Redo", priority=True),
         Binding("ctrl+delete", "delete_block", "Delete block", priority=True),
         ("escape", "app.pop_screen", "Back"),
     ]
@@ -57,6 +60,7 @@ class EditorScreen(Screen[None]):
         self._modified_gmt: str | None = None
         self._settings = PostSettings(post_type=self._post_type)
         self._canvas: BlockCanvas | None = None
+        self._history: DocumentHistory | None = None
         self._saving = False
         # Set when a create fails with a lost response (it may have committed): the next save
         # reconciles before creating again so a retry can't silently duplicate the post.
@@ -87,6 +91,7 @@ class EditorScreen(Screen[None]):
         """Set up an empty canvas for a brand-new post/page (no fetch)."""
         canvas = BlockCanvas([])
         self._canvas = canvas
+        self._history = DocumentHistory("")
         await self.query_one("#editor-body", Static).remove()
         await self.mount(canvas, before=self.query_one("#editor-status"))
         self.query_one("#editor-title", Input).focus()
@@ -113,6 +118,7 @@ class EditorScreen(Screen[None]):
         blocks = parse(detail.content_raw)
         canvas = BlockCanvas(blocks)
         self._canvas = canvas
+        self._history = DocumentHistory(serialize(blocks))
         body = self.query_one("#editor-body", Static)
         await body.remove()
         await self.mount(canvas, before=self.query_one("#editor-status"))
@@ -134,18 +140,22 @@ class EditorScreen(Screen[None]):
 
     async def action_move_up(self) -> None:
         if self._canvas is not None:
+            self._checkpoint()
             await self._canvas.move_focused(-1)
 
     async def action_move_down(self) -> None:
         if self._canvas is not None:
+            self._checkpoint()
             await self._canvas.move_focused(+1)
 
     async def action_insert_paragraph(self) -> None:
         if self._canvas is not None:
+            self._checkpoint()
             await self._canvas.insert_paragraph()
 
     async def action_delete_block(self) -> None:
         if self._canvas is not None:
+            self._checkpoint()
             await self._canvas.delete_focused()
 
     def action_add_image(self) -> None:
@@ -155,6 +165,34 @@ class EditorScreen(Screen[None]):
         from wptui.widgets.media_picker import MediaPickerModal
 
         self.app.push_screen(MediaPickerModal(), self._image_uploaded)
+
+    def _checkpoint(self) -> None:
+        """Flush editors and record the current document snapshot for undo/redo."""
+        if self._canvas is None or self._history is None:
+            return
+        try:
+            self._canvas.sync()
+            self._history.record(serialize(self._canvas.blocks))
+        except Exception:
+            pass  # a transiently unserializable block must not break editing
+
+    async def action_undo(self) -> None:
+        """Restore the previous document snapshot."""
+        if self._canvas is None or self._history is None:
+            return
+        self._checkpoint()  # capture the current change before stepping back
+        snapshot = self._history.undo()
+        if snapshot is not None:
+            await self._canvas.reload(parse(snapshot))
+
+    async def action_redo(self) -> None:
+        """Re-apply an undone snapshot."""
+        if self._canvas is None or self._history is None:
+            return
+        self._checkpoint()  # an edit made since the last undo records here, clearing redo
+        snapshot = self._history.redo()
+        if snapshot is not None:
+            await self._canvas.reload(parse(snapshot))
 
     def action_heading_level(self) -> None:
         """Open the heading-level picker for the focused heading (no-op otherwise)."""
@@ -170,6 +208,7 @@ class EditorScreen(Screen[None]):
     def _apply_heading_level(self, target, level) -> None:
         if level is None or self._canvas is None:
             return
+        self._checkpoint()
         self.run_worker(self._canvas.set_heading_level_on(target, level))
 
     def _image_uploaded(self, media) -> None:
@@ -177,6 +216,7 @@ class EditorScreen(Screen[None]):
             return
         from wptui.blocks.factory import new_image_block
 
+        self._checkpoint()
         self.run_worker(self._canvas.insert_block(new_image_block(media)))
 
     def on_inline_markdown_area_slash_requested(self, message) -> None:
@@ -201,6 +241,7 @@ class EditorScreen(Screen[None]):
         canvas = self._canvas
         if canvas is None:
             return
+        self._checkpoint()
         if not await canvas.replace_block(target, block_type.factory()):
             # The captured block is gone (e.g. deleted before the picker closed).
             self._set_status("Couldn't switch block — it's no longer here.", error=True)
@@ -210,21 +251,25 @@ class EditorScreen(Screen[None]):
         processes queued Enters one at a time — each re-reads live focus, so a fast
         Enter-Enter is "new item then exit", never a stale re-split."""
         if self._canvas is not None:
+            self._checkpoint()
             await self._canvas.nested_enter()
 
     async def on_inline_markdown_area_nested_backspace(self, message) -> None:
         """Backspace at the start of a child: remove it (empty) or merge into the previous."""
         if self._canvas is not None:
+            self._checkpoint()
             await self._canvas.nested_backspace()
 
     async def on_inline_markdown_area_indent_requested(self, message) -> None:
         """Tab in a list-item: indent it under the previous sibling."""
         if self._canvas is not None:
+            self._checkpoint()
             await self._canvas.indent_focused()
 
     async def on_inline_markdown_area_outdent_requested(self, message) -> None:
         """Shift+Tab in a list-item: outdent it to the enclosing list."""
         if self._canvas is not None:
+            self._checkpoint()
             await self._canvas.outdent_focused()
 
     def on_inline_markdown_area_vim_command(self, message) -> None:
@@ -418,6 +463,8 @@ class EditorScreen(Screen[None]):
             content = serialize(self._canvas.blocks)
         except Exception:
             return  # a transiently unserializable block must not break autosave
+        if self._history is not None:
+            self._history.record(content)  # coarse text-edit checkpoint for undo/redo
         title = self.query_one("#editor-title", Input).value
         if not title.strip() and not content.strip():
             return  # nothing worth saving yet
@@ -502,6 +549,7 @@ class EditorScreen(Screen[None]):
         canvas = BlockCanvas(parse(snap.get("content", "")))
         old = self._canvas
         self._canvas = canvas
+        self._history = DocumentHistory(serialize(canvas.blocks))  # baseline on the restored content
         if old is not None:
             await old.remove()
         await self.mount(canvas, before=self.query_one("#editor-status"))

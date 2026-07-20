@@ -199,6 +199,165 @@ async def test_term_picker_creates_new_term():
 
 
 @pytest.mark.asyncio
+async def test_term_picker_enter_in_new_field_creates_term():
+    """Pressing Enter in the 'new name' field must create the term — the keyboard path,
+    not just clicking the Add button."""
+    from textual.widgets import Input as TInput
+
+    from wptui.widgets.term_picker import TermPicker
+
+    class App2(App):
+        def compose(self):
+            yield from ()
+
+    client = TermClient()
+    app = App2()
+    app.client = client
+    result: dict = {}
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app.push_screen(TermPicker("tags", []), lambda ids: result.update(ids=ids))
+        await pilot.pause()
+        await pilot.pause()
+        field = app.screen.query_one("#term-new", TInput)
+        field.focus()
+        field.value = "Keyboard"
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+        await pilot.pause()
+        assert field.value == ""  # field cleared after a successful add
+        await pilot.press("escape")
+        await pilot.pause()
+    assert client.created == [("tags", "Keyboard")]
+    assert 99 in result["ids"]
+
+
+@pytest.mark.asyncio
+async def test_term_picker_comma_separated_creates_each():
+    """A comma-separated entry creates one term per name."""
+    from textual.widgets import Input as TInput
+
+    from wptui.api import Term
+    from wptui.widgets.term_picker import TermPicker
+
+    class MultiClient(TermClient):
+        def __init__(self) -> None:
+            super().__init__()
+            self._next = 100
+
+        async def create_term(self, taxonomy, name):
+            self.created.append((taxonomy, name))
+            tid = self._next
+            self._next += 1
+            return Term(tid, name, "post_tag")
+
+    class App2(App):
+        def compose(self):
+            yield from ()
+
+    client = MultiClient()
+    app = App2()
+    app.client = client
+    result: dict = {}
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app.push_screen(TermPicker("tags", []), lambda ids: result.update(ids=ids))
+        await pilot.pause()
+        await pilot.pause()
+        field = app.screen.query_one("#term-new", TInput)
+        field.focus()
+        field.value = "alpha, beta,  gamma "
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+        await pilot.pause()
+        await pilot.press("escape")
+        await pilot.pause()
+    assert client.created == [("tags", "alpha"), ("tags", "beta"), ("tags", "gamma")]
+    assert set(result["ids"]) == {100, 101, 102}
+
+
+@pytest.mark.asyncio
+async def test_term_picker_enter_on_empty_field_is_noop():
+    """Enter on an empty or whitespace-only field must not call the API."""
+    from textual.widgets import Input as TInput
+
+    from wptui.widgets.term_picker import TermPicker
+
+    class App2(App):
+        def compose(self):
+            yield from ()
+
+    client = TermClient()
+    app = App2()
+    app.client = client
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app.push_screen(TermPicker("tags", []), lambda ids: None)
+        await pilot.pause()
+        await pilot.pause()
+        field = app.screen.query_one("#term-new", TInput)
+        field.focus()
+        field.value = "   "  # whitespace only
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+        await pilot.pause()
+    assert client.created == []
+
+
+@pytest.mark.asyncio
+async def test_term_picker_partial_failure_keeps_remainder_in_field():
+    """A mid-batch failure must not re-run the names that already succeeded: the field is
+    trimmed to the failed name onward so a retry only re-attempts those."""
+    from textual.widgets import Input as TInput
+    from textual.widgets import SelectionList
+
+    from wptui.api import ApiError, Term
+    from wptui.widgets.term_picker import TermPicker
+
+    class FlakyClient(TermClient):
+        def __init__(self) -> None:
+            super().__init__()
+            self._next = 100
+
+        async def create_term(self, taxonomy, name):
+            self.created.append((taxonomy, name))
+            if name == "boom":
+                raise ApiError("nope")
+            tid = self._next
+            self._next += 1
+            return Term(tid, name, "post_tag")
+
+    class App2(App):
+        def compose(self):
+            yield from ()
+
+    client = FlakyClient()
+    app = App2()
+    app.client = client
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app.push_screen(TermPicker("tags", []), lambda ids: None)
+        await pilot.pause()
+        await pilot.pause()
+        field = app.screen.query_one("#term-new", TInput)
+        field.focus()
+        field.value = "alpha, boom, gamma"
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+        await pilot.pause()
+        # alpha created, boom attempted and failed, gamma never reached.
+        assert client.created == [("tags", "alpha"), ("tags", "boom")]
+        # The already-created alpha is selected; the field keeps the unprocessed remainder.
+        sl = app.screen.query_one("#term-list", SelectionList)
+        assert 100 in sl.selected
+        assert field.value == "boom, gamma"
+
+
+@pytest.mark.asyncio
 async def test_term_picker_reuses_existing_shown_term():
     """An inline 'add' that the client resolves to an already-listed term selects that row
     instead of adding a duplicate option (the term_exists reuse path)."""

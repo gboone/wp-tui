@@ -314,16 +314,23 @@ class EditorScreen(Screen[None]):
             # A create whose response was lost may have committed server-side; _commit_save
             # flags it so the next Ctrl+S reconciles before creating a (duplicate) post.
             if self._unverified_create:
+                self._flush_local_snapshot()  # guarantee the work is on disk regardless
                 self._set_status(
-                    f"Save failed: {err} Your post may already have been created — "
-                    "press Ctrl+S to retry safely.",
+                    f"Not saved to {self._site()}: {err} Your post may already have been "
+                    "created — kept locally; press Ctrl+S to retry safely.",
                     error=True,
                 )
+                self.notify(
+                    "Couldn't confirm the save. Your work is kept locally on this "
+                    "computer — press Ctrl+S to retry.",
+                    title="Saved locally only",
+                    severity="warning",
+                )
             else:
-                self._set_status(f"Save failed: {err}", error=True)
+                self._announce_saved_local(str(err))
             return
         except ApiError as err:
-            self._set_status(f"Save failed: {err}", error=True)
+            self._announce_saved_local(str(err))
             return
         except Exception as err:  # never let a save crash the whole TUI
             self._set_status(f"Save failed unexpectedly: {err}", error=True)
@@ -340,7 +347,7 @@ class EditorScreen(Screen[None]):
         if self._draft_key is not None:
             clear_snapshot(self._draft_key)
         self._last_saved_sig = None
-        self._set_status(f"Saved · {detail.status} · modified {detail.modified_gmt}")
+        self._announce_saved_remote(detail)
 
     def _offer_conflict_resolution(self, err: ConflictError) -> None:
         """Ask how to resolve a save conflict and act on the choice."""
@@ -524,7 +531,10 @@ class EditorScreen(Screen[None]):
 
     def _site(self) -> str:
         profile = getattr(self.app, "profile", None)
-        return profile.base_url if profile is not None else "local"
+        # Normalize the trailing slash: the URL seeds both the draft key and the recovery
+        # filter, so "https://site.com/" and "https://site.com" must not fork into two keys
+        # that hide each other's snapshots across a reconnect.
+        return profile.base_url.rstrip("/") if profile is not None else "local"
 
     def _draft_key_for(self, post_id: int | None) -> str:
         """A stable key for this draft: by post id when saved, else by editor session."""
@@ -563,6 +573,57 @@ class EditorScreen(Screen[None]):
             "site": self._site(),
             "saved_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         }
+
+    def _flush_local_snapshot(self) -> bool:
+        """Write the current buffer to the recovery store *now* (not on the timer).
+
+        Called when a remote save fails so the latest work is guaranteed on disk before we
+        tell the user it's safe locally, instead of relying on the next autosave tick (which
+        the user may never reach if they quit after seeing the failure). Returns whether a
+        snapshot was actually persisted.
+        """
+        if self._canvas is None or self._draft_key is None:
+            return False
+        try:
+            self._canvas.sync()
+            content = serialize(self._canvas.blocks)
+        except Exception:
+            return False  # a transiently unserializable block must not break the flush
+        title = self.query_one("#editor-title", Input).value
+        if not title.strip() and not content.strip():
+            return False  # nothing worth saving yet
+        write_snapshot(self._draft_key, self._snapshot(title, content))
+        self._last_saved_sig = f"{title}\x00{content}"
+        return True
+
+    def _announce_saved_remote(self, detail: PostDetail) -> None:
+        """Confirm — unmistakably — that the post is now on the server."""
+        msg = f"Saved to {self._site()} · {detail.status}"
+        self._set_status(f"✓ {msg} · modified {detail.modified_gmt}")
+        self.notify(msg, title="Saved to site", severity="information")
+
+    def _announce_saved_local(self, problem: str) -> None:
+        """Report a failed remote save, distinguishing "kept locally" from "lost".
+
+        On a reachable-but-rejected or unreachable server the buffer is flushed to disk and
+        the user is told their work is safe on this computer; only if even the local flush
+        fails (nothing to save, or an unserializable buffer) is it a bare failure.
+        """
+        if self._flush_local_snapshot():
+            self._set_status(
+                f"⚠ Not saved to {self._site()}: {problem} Kept locally on this "
+                "computer — reopen to recover, or press Ctrl+S to retry.",
+                error=True,
+            )
+            self.notify(
+                f"Couldn't reach {self._site()}. Your work is saved locally on this "
+                "computer only — press Ctrl+S to retry.",
+                title="Saved locally only",
+                severity="warning",
+            )
+        else:
+            self._set_status(f"Save failed: {problem}", error=True)
+            self.notify(f"Save failed: {problem}", title="Save failed", severity="error")
 
     def _maybe_offer_restore(self, server_content: str, server_title: str) -> None:
         """On opening an existing post, offer to restore a newer local snapshot."""

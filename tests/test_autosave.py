@@ -55,6 +55,15 @@ class _BareClient:
         pass
 
 
+class _OfflineClient(_BareClient):
+    """A client whose create always fails as if the site were unreachable."""
+
+    async def create_post(self, post_type, *, title_raw="", content_raw="", settings=None):
+        from wptui.api import NetworkError
+
+        raise NetworkError("Connection refused")
+
+
 @pytest.mark.asyncio
 async def test_autosave_tick_writes_snapshot_for_new_post():
     from wptui.app import WPTuiApp
@@ -197,3 +206,83 @@ async def test_new_editor_offers_resume_of_pending_draft():
         assert isinstance(editor, EditorScreen)
         assert editor.query_one("#editor-title", Input).value == "Half-written"
         assert editor._draft_key == "local|new|abc123"
+
+
+# --------------------------------------------------- save-outcome confirmation
+
+
+@pytest.mark.asyncio
+async def test_successful_remote_save_announces_the_site():
+    from textual.widgets import Static
+
+    from wptui.app import WPTuiApp
+    from wptui.screens.editor import EditorScreen
+
+    app = WPTuiApp()
+    app.client = _BareClient()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app.push_screen(EditorScreen(post_type="post"))
+        await pilot.pause()
+        await pilot.pause()
+        editor = app.screen
+        editor.query_one("#editor-title", Input).value = "Going remote"
+        await pilot.pause()
+        await pilot.press("ctrl+s")
+        await pilot.pause()
+        await pilot.pause()
+        status = str(editor.query_one("#editor-status", Static).content).lower()
+        # Success must read unmistakably as a *remote* save, not a bare "saved".
+        assert "saved to" in status
+        assert not editor.query_one("#editor-status", Static).has_class("error")
+
+
+@pytest.mark.asyncio
+async def test_failed_remote_save_keeps_work_locally_and_says_so():
+    from textual.widgets import Static
+
+    from wptui.app import WPTuiApp
+    from wptui.screens.editor import EditorScreen
+
+    app = WPTuiApp()
+    app.client = _OfflineClient()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app.push_screen(EditorScreen(post_type="post"))
+        await pilot.pause()
+        await pilot.pause()
+        editor = app.screen
+        editor.query_one("#editor-title", Input).value = "Only local"
+        await pilot.pause()
+        await pilot.press("ctrl+s")
+        await pilot.pause()
+        await pilot.pause()
+        # The remote save failed, so the buffer must be flushed to the recovery store
+        # immediately (not left waiting for the next autosave tick) …
+        snap = autosave.read_snapshot(editor._draft_key)
+        assert snap is not None and snap["title"] == "Only local"
+        # … and the status must distinguish "kept locally" from a plain failure.
+        status_widget = editor.query_one("#editor-status", Static)
+        status = str(status_widget.content).lower()
+        assert "local" in status
+        assert status_widget.has_class("error")
+
+
+@pytest.mark.asyncio
+async def test_site_key_strips_trailing_slash():
+    from wptui.app import WPTuiApp
+    from wptui.config import SiteProfile
+    from wptui.screens.editor import EditorScreen
+
+    app = WPTuiApp()
+    app.client = _BareClient()
+    app.profile = SiteProfile(name="x", base_url="https://ex.com/", username="u")
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app.push_screen(EditorScreen(post_type="post"))
+        await pilot.pause()
+        await pilot.pause()
+        editor = app.screen
+        # A trailing slash on the profile URL must not fork the recovery key, or a
+        # reconnect that drops/adds the slash would hide an existing local draft.
+        assert editor._site() == "https://ex.com"

@@ -170,7 +170,10 @@ async def test_non_conflict_error_shows_status_no_modal():
         assert editor._modified_gmt == "T1"  # nothing saved
         assert serialize(editor._canvas.blocks) == before  # buffer untouched
         status = editor.query_one("#editor-status", Static)
-        assert "failed" in str(status.render()).lower()  # error surfaced
+        # A non-conflict failure surfaces as an error and, since the buffer was flushed to
+        # the recovery store, tells the user their work is kept locally (not merely "failed").
+        assert status.has_class("error")
+        assert "local" in str(status.render()).lower()
 
 
 @pytest.mark.asyncio

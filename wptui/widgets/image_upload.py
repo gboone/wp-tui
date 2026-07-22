@@ -34,7 +34,7 @@ class ImageUploadModal(ModalScreen[MediaItem]):
             yield Input(placeholder="title", id="img-title")
             yield Input(placeholder="description", id="img-desc")
             yield Button("Upload", id="img-upload", variant="primary")
-            yield Static("", id="img-upload-status")
+            yield Static("", id="img-upload-status", markup=False)
 
     @on(Button.Pressed, "#img-upload")
     def _upload_pressed(self) -> None:

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from urllib.parse import urlparse
+
 from textual import on, work
 from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical
@@ -54,7 +56,7 @@ class ConnectScreen(Screen[None]):
             )
             with Horizontal(id="connect-buttons"):
                 yield Button("Connect", variant="primary", id="connect")
-            yield Static("", id="connect-status")
+            yield Static("", id="connect-status", markup=False)
         yield Footer()
 
     def on_mount(self) -> None:
@@ -96,7 +98,12 @@ class ConnectScreen(Screen[None]):
         if not (base_url and username and app_password):
             self._set_status("Site URL, username, and password are all required.", error=True)
             return
-        if base_url.startswith("http://"):
+        # Parse rather than string-prefix-match so the scheme check is case-insensitive
+        # (``HTTP://`` must not slip past the plaintext refusal) and so we can inspect
+        # userinfo. Assume a bare host means https:// — only prepend when no scheme is present.
+        parsed = urlparse(base_url if "://" in base_url else "https://" + base_url)
+        scheme = parsed.scheme.lower()
+        if scheme == "http":
             # HTTP Basic sends the Application Password in (reversible) base64; refuse to
             # transmit it over an unencrypted channel.
             self._set_status(
@@ -104,8 +111,20 @@ class ConnectScreen(Screen[None]):
                 error=True,
             )
             return
-        if not base_url.startswith("https://"):
-            base_url = "https://" + base_url
+        if scheme != "https":
+            self._set_status(
+                f"Unsupported URL scheme '{parsed.scheme}'. Use https://.", error=True
+            )
+            return
+        if parsed.username or parsed.password:
+            # httpx honours the explicit auth= even with userinfo in the URL, so a URL like
+            # https://legit.com@evil.com would send the Application Password to evil.com.
+            self._set_status(
+                "The site URL must not contain an embedded username or password.",
+                error=True,
+            )
+            return
+        base_url = parsed._replace(scheme="https").geturl()
         profile = SiteProfile(name=base_url, base_url=base_url, username=username)
         self._set_status("Connecting…")
         self._connect(profile, app_password)

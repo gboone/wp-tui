@@ -9,6 +9,7 @@ Dismisses ``None`` on cancel.
 
 from __future__ import annotations
 
+from rich.markup import escape
 from textual import on, work
 from textual.app import ComposeResult
 from textual.containers import Vertical
@@ -33,7 +34,7 @@ class MediaPickerModal(ModalScreen[MediaItem]):
             yield Input(placeholder="search…", id="media-search")
             yield OptionList(id="media-list")
             yield Button("Upload new file…", id="media-upload")
-            yield Static("", id="media-status")
+            yield Static("", id="media-status", markup=False)
 
     def on_mount(self) -> None:
         self._load()
@@ -85,4 +86,6 @@ class MediaPickerModal(ModalScreen[MediaItem]):
 
 def _row_label(item: MediaItem) -> str:
     name = item.source_url.rsplit("/", 1)[-1] or item.title_raw or f"media {item.id}"
-    return f"{name} — {item.mime} (#{item.id})"
+    # OptionList prompts are parsed as Textual markup — escape the server-supplied
+    # filename/mime so a value like "[/]" can't crash the list or inject an action link.
+    return escape(f"{name} — {item.mime} (#{item.id})")

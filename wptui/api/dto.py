@@ -65,8 +65,8 @@ class PostDetail:
             excerpt_raw=_raw(data.get("excerpt")),
             date=data.get("date", ""),
             password=data.get("password", ""),
-            categories=tuple(data.get("categories", []) or []),
-            tags=tuple(data.get("tags", []) or []),
+            categories=_int_tuple(data.get("categories")),
+            tags=_int_tuple(data.get("tags")),
             featured_media=data.get("featured_media", 0) or 0,
             parent=data.get("parent", 0) or 0,
             menu_order=data.get("menu_order", 0) or 0,
@@ -182,6 +182,19 @@ def _rendered(field_value: dict[str, Any] | None) -> str:
     if not field_value:
         return ""
     return field_value.get("rendered", "") or ""
+
+
+def _int_tuple(value: Any) -> tuple[int, ...]:
+    """Coerce a REST id array (categories/tags) into a tuple of ints, tolerating junk.
+
+    ``tuple(value or [])`` crashed with a ``TypeError`` when the server returned a non-iterable
+    (e.g. ``categories`` as an int), escaping the async worker. Non-list shapes now collapse to
+    ``()`` and non-int members (including ``bool``) are dropped, so downstream ``to_payload``
+    always sends a clean id list.
+    """
+    if not isinstance(value, (list, tuple)):
+        return ()
+    return tuple(v for v in value if isinstance(v, int) and not isinstance(v, bool))
 
 
 def _raw(field_value: dict[str, Any] | None) -> str:

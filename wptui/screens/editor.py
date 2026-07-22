@@ -75,7 +75,7 @@ class EditorScreen(Screen[None]):
         yield Header()
         yield Input(placeholder="(title)", id="editor-title")
         yield Static("Loading…", id="editor-body")
-        yield Static("", id="editor-status")
+        yield Static("", id="editor-status", markup=False)
         yield Footer()
 
     def on_mount(self) -> None:

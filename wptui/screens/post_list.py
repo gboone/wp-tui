@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from rich.markup import escape
 from textual import on, work
 from textual.app import ComposeResult
 from textual.screen import Screen
@@ -31,7 +32,7 @@ class PostListScreen(Screen[None]):
         yield Header()
         yield Input(placeholder="Search posts… (press / )", id="post-search")
         yield DataTable(id="post-table", cursor_type="row", zebra_stripes=True)
-        yield Static("", id="post-status")
+        yield Static("", id="post-status", markup=False)
         yield Footer()
 
     def on_mount(self) -> None:
@@ -83,11 +84,14 @@ class PostListScreen(Screen[None]):
         table.clear()
         self._rows.clear()
         for post in posts:
+            # Cells render via Text.from_markup, so escape server-controlled strings —
+            # e.g. a post titled "[/]" would otherwise raise MarkupError mid-render and
+            # break the whole table for anyone who can see that post.
             key = table.add_row(
                 str(post.id),
-                post.title,
-                post.status,
-                post.modified_gmt.replace("T", " "),
+                escape(post.title),
+                escape(post.status),
+                escape(post.modified_gmt.replace("T", " ")),
             )
             self._rows[key] = post
         self._set_status(f"{len(posts)} post(s). Enter to open, / to search, r to reload.")

@@ -8,6 +8,7 @@ assignment the user couldn't see.
 
 from __future__ import annotations
 
+from rich.markup import escape
 from textual import on, work
 from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical
@@ -36,7 +37,7 @@ class TermPicker(ModalScreen[list[int]]):
             with Horizontal(id="term-add-row"):
                 yield Input(placeholder="new name (Enter to add; commas separate)", id="term-new")
                 yield Button("Add", id="term-add")
-            yield Static("", id="term-status")
+            yield Static("", id="term-status", markup=False)
 
     def on_mount(self) -> None:
         self._load()
@@ -58,7 +59,9 @@ class TermPicker(ModalScreen[list[int]]):
         sl.clear_options()
         self._shown = set()
         for term in terms:
-            sl.add_option((term.name, term.id, term.id in self._selected))
+            # Selection prompts are parsed as Textual markup — escape the server-supplied
+            # term name so e.g. "[/]" can't crash the list or inject an action link.
+            sl.add_option((escape(term.name), term.id, term.id in self._selected))
             self._shown.add(term.id)
 
     @on(Input.Submitted, "#term-search")
@@ -114,7 +117,7 @@ class TermPicker(ModalScreen[list[int]]):
             if term.id in self._shown:
                 sl.select(term.id)
             else:
-                sl.add_option((term.name, term.id, True))
+                sl.add_option((escape(term.name), term.id, True))
                 self._shown.add(term.id)
             self._selected.add(term.id)
             added.append(term.name)

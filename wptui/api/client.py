@@ -45,6 +45,11 @@ _IMAGE_MIME = {
 }
 
 
+# Upper bound on a single media upload read into memory. Guards against a runaway read of a
+# device like /dev/zero (memory exhaustion) or a huge file blocking the event loop.
+_MAX_UPLOAD_BYTES = 64 * 1024 * 1024  # 64 MiB
+
+
 def _guess_mime(filename: str) -> str:
     ext = Path(filename).suffix.lower()
     if ext in _IMAGE_MIME:
@@ -242,7 +247,19 @@ class WordPressClient:
         :class:`NetworkError` if the file can't be read or the server rejects it.
         """
         path = Path(file_path)
+        # Require a regular file and size-cap before reading: a character device such as
+        # /dev/zero passes os.path.exists but read_bytes() would loop forever (memory
+        # exhaustion), and a very large regular file would block the event loop during the
+        # synchronous read. is_file() is False for devices/dirs/fifos, so both are rejected.
         try:
+            if not path.is_file():
+                raise NetworkError(f"Not a regular file: '{file_path}'.")
+            size = path.stat().st_size
+            if size > _MAX_UPLOAD_BYTES:
+                raise NetworkError(
+                    f"File is too large to upload ({size / 1024 / 1024:.1f} MiB; "
+                    f"limit {_MAX_UPLOAD_BYTES // 1024 // 1024} MiB)."
+                )
             data = path.read_bytes()
         except OSError as err:
             raise NetworkError(f"Cannot read file '{file_path}': {err}") from err
@@ -342,11 +359,18 @@ def _parse_list(
     """Coerce a JSON list body into DTOs, rejecting a non-list shape as a NetworkError.
 
     Shared by ``list_posts``/``list_media``/``list_terms`` so the list-shape guard and the
-    skip-non-dict-entries rule stay identical across all three collection reads.
+    entry guards stay identical across all three collection reads. Each ``from_json`` builder
+    reads ``data["id"]`` directly, so a hostile/broken endpoint that ignores ``_fields`` and
+    returns ``[{}]`` would raise a bare ``KeyError`` that escapes the async worker; requiring a
+    valid id here routes that through :class:`NetworkError` like the singular ``_post_detail``
+    guard, so screens' ``except ApiError`` handlers catch it.
     """
     if not isinstance(data, list):
         raise NetworkError(f"Expected a list of {label} from the server.")
-    return [from_json(item) for item in data if isinstance(item, dict)]
+    items = [item for item in data if isinstance(item, dict)]
+    if not all("id" in item for item in items):
+        raise NetworkError(f"The server returned a {label} entry without an id.")
+    return [from_json(item) for item in items]
 
 
 def _post_detail(data: Any) -> PostDetail:
